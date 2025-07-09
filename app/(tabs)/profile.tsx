@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,21 +11,23 @@ import {
   SafeAreaView,
 } from 'react-native';
 import { User, Building, Mail, Phone, MapPin, Clock, CreditCard, Settings, CircleHelp as HelpCircle, LogOut, CreditCard as Edit3, Save, X } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { theme } from '@/constants/theme';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
+import { getPartnerProfile, updatePartnerProfile } from '@/utils/api';
 
 interface ProfileData {
   businessName: string;
-  ownerName: string;
+  
   email: string;
   phone: string;
   address: string;
   serviceArea: string;
   workingHours: {
-    start: string;
-    end: string;
+    openTime: string;
+    closeTime: string;
   };
   notifications: {
     newOrders: boolean;
@@ -34,40 +36,74 @@ interface ProfileData {
   };
 }
 
-const initialProfileData: ProfileData = {
-  businessName: 'Clean & Fresh Laundry',
-  ownerName: 'Rajesh Kumar',
-  email: 'rajesh@cleanfresh.com',
-  phone: '+91 98765 43210',
-  address: 'Shop No. 15, Shela Market, Ahmedabad, Gujarat 380058',
-  serviceArea: 'Shela, SG Highway, Gota, Bopal',
-  workingHours: {
-    start: '08:00',
-    end: '20:00',
-  },
-  notifications: {
-    newOrders: true,
-    payments: true,
-    messages: false,
-  },
-};
-
 export default function ProfileScreen() {
-  const [profileData, setProfileData] = useState<ProfileData>(initialProfileData);
+  const [profileData, setProfileData] = useState<ProfileData | null>(null);
   const [isEditing, setIsEditing] = useState(false);
-  const [editData, setEditData] = useState<ProfileData>(initialProfileData);
+  const [editData, setEditData] = useState<ProfileData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const token = await AsyncStorage.getItem('token');
+      // console.log('Loaded token:', token);
+      if (!token) {
+        router.replace('/login');
+        return;
+      }
+      try {
+        const res = await getPartnerProfile();
+        // console.log('Fetched profile data:', res);
+        const apiData = res.data;
+        const mappedProfile: ProfileData = {
+          businessName: apiData.name || '',
+          // ownerName: '', // Not present in backend, set as empty or fetch if available
+          email: apiData.email || '',
+          phone: apiData.mobile || '',
+          address: apiData.address || '',
+          serviceArea: apiData.areaId || '',
+          workingHours: {
+            openTime: (apiData.hours && apiData.hours.openTime) ? apiData.hours.openTime : '',
+            closeTime: (apiData.hours && apiData.hours.closeTime) ? apiData.hours.closeTime : '',
+          },
+          notifications: {
+            newOrders: false,
+            payments: false,
+            messages: false,
+          },
+        };
+        setProfileData(mappedProfile);
+        setEditData(mappedProfile);
+      } catch (e) {
+        console.log('Error fetching profile:', e);
+        Alert.alert('Error', 'Failed to load profile');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
 
   const handleEditToggle = () => {
-    if (isEditing) {
+    console.log('Toggling edit mode. Current isEditing:', isEditing);
+    if (isEditing && profileData) {
       setEditData(profileData);
     }
     setIsEditing(!isEditing);
   };
 
-  const handleSave = () => {
-    setProfileData(editData);
-    setIsEditing(false);
-    Alert.alert('Success', 'Profile updated successfully!');
+  const handleSave = async () => {
+    if (!editData) return;
+    console.log('Saving profile with data:', editData);
+    try {
+      const updated = await updatePartnerProfile(editData);
+      console.log('Profile updated:', updated);
+      setProfileData(updated);
+      setEditData(updated);
+      setIsEditing(false);
+      Alert.alert('Success', 'Profile updated successfully!');
+    } catch (e: any) {
+      console.log('Error updating profile:', e);
+      Alert.alert('Error', e.message || 'Failed to update profile');
+    }
   };
 
   const handleLogout = () => {
@@ -88,26 +124,34 @@ export default function ProfileScreen() {
   };
 
   const updateEditData = (field: string, value: any) => {
-    setEditData(prev => ({
-      ...prev,
-      [field]: value,
-    }));
+    console.log('Updating field', field, 'with value', value);
+    setEditData(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        [field]: value,
+      };
+    });
   };
 
   const updateNotificationSettings = (setting: keyof ProfileData['notifications'], value: boolean) => {
-    setEditData(prev => ({
-      ...prev,
-      notifications: {
-        ...prev.notifications,
-        [setting]: value,
-      },
-    }));
+    console.log('Updating notification setting', setting, 'to', value);
+    setEditData(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        notifications: {
+          ...prev.notifications,
+          [setting]: value,
+        },
+      };
+    });
   };
 
   const renderEditableField = (
     icon: React.ReactNode,
     label: string,
-    value: string,
+    value: string | undefined,
     field: string,
     placeholder?: string,
     multiline?: boolean
@@ -120,7 +164,7 @@ export default function ProfileScreen() {
       {isEditing ? (
         <TextInput
           style={[styles.fieldInput, multiline && styles.textArea]}
-          value={value}
+          value={value || ''}
           onChangeText={(text) => updateEditData(field, text)}
           placeholder={placeholder}
           placeholderTextColor={theme.colors.textSecondary}
@@ -144,13 +188,28 @@ export default function ProfileScreen() {
         <Text style={styles.notificationDescription}>{description}</Text>
       </View>
       <Switch
-        value={editData.notifications[setting]}
+        value={!!editData?.notifications?.[setting]}
         onValueChange={(value) => updateNotificationSettings(setting, value)}
         trackColor={{ false: theme.colors.border, true: theme.colors.primary }}
-        thumbColor={editData.notifications[setting] ? theme.colors.white : theme.colors.textSecondary}
+        thumbColor={editData?.notifications?.[setting] ? theme.colors.white : theme.colors.textSecondary}
       />
     </View>
   );
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Text style={{textAlign: 'center', marginTop: 40}}>Loading...</Text>
+      </SafeAreaView>
+    );
+  }
+  if (!profileData || !editData) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Text style={{textAlign: 'center', marginTop: 40}}>No profile data found.</Text>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -181,13 +240,13 @@ export default function ProfileScreen() {
             'Enter business name'
           )}
 
-          {renderEditableField(
+          {/* {renderEditableField(
             <User size={20} color={theme.colors.primary} />,
             'Owner Name',
             editData.ownerName,
             'ownerName',
             'Enter owner name'
-          )}
+          )} */}
 
           {renderEditableField(
             <Mail size={20} color={theme.colors.primary} />,
@@ -230,33 +289,33 @@ export default function ProfileScreen() {
           <View style={styles.workingHoursContainer}>
             <View style={styles.timeField}>
               <Clock size={20} color={theme.colors.primary} />
-              <Text style={styles.timeLabel}>Start Time</Text>
+              <Text style={styles.timeLabel}>Open Time</Text>
               {isEditing ? (
                 <TextInput
                   style={styles.timeInput}
-                  value={editData.workingHours.start}
-                  onChangeText={(text) => updateEditData('workingHours', { ...editData.workingHours, start: text })}
+                  value={editData.workingHours?.openTime || ''}
+                  onChangeText={(text) => updateEditData('workingHours', { ...((editData.workingHours || { openTime: '', closeTime: '' })), openTime: text })}
                   placeholder="08:00"
                   placeholderTextColor={theme.colors.textSecondary}
                 />
               ) : (
-                <Text style={styles.timeValue}>{editData.workingHours.start}</Text>
+                <Text style={styles.timeValue}>{editData.workingHours?.openTime || ''}</Text>
               )}
             </View>
 
             <View style={styles.timeField}>
               <Clock size={20} color={theme.colors.secondary} />
-              <Text style={styles.timeLabel}>End Time</Text>
+              <Text style={styles.timeLabel}>Close Time</Text>
               {isEditing ? (
                 <TextInput
                   style={styles.timeInput}
-                  value={editData.workingHours.end}
-                  onChangeText={(text) => updateEditData('workingHours', { ...editData.workingHours, end: text })}
+                  value={editData.workingHours?.closeTime || ''}
+                  onChangeText={(text) => updateEditData('workingHours', { ...((editData.workingHours || { openTime: '', closeTime: '' })), closeTime: text })}
                   placeholder="20:00"
                   placeholderTextColor={theme.colors.textSecondary}
                 />
               ) : (
-                <Text style={styles.timeValue}>{editData.workingHours.end}</Text>
+                <Text style={styles.timeValue}>{editData.workingHours?.closeTime || ''}</Text>
               )}
             </View>
           </View>

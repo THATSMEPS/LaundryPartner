@@ -13,124 +13,80 @@ import {
 import { Bell, RefreshCw } from 'lucide-react-native';
 import { theme } from '@/constants/theme';
 import OrderCard, { Order } from '@/components/OrderCard';
-
-const mockOrders: Order[] = [
-  {
-    id: 'ORD001',
-    customerName: 'Rajesh Kumar',
-    phoneNumber: '+91 98765 43210',
-    pickupAddress: 'A/203, Shela Garden, Ahmedabad',
-    pickupDate: '2025-01-10',
-    pickupTime: '10:00 AM',
-    itemCount: '5 kg Wash & Fold',
-    status: 'pending',
-    totalAmount: 250,
-  },
-  {
-    id: 'ORD002',
-    customerName: 'Priya Sharma',
-    phoneNumber: '+91 87654 32109',
-    pickupAddress: 'B/105, Maple Heights, Shela',
-    pickupDate: '2025-01-10',
-    pickupTime: '2:00 PM',
-    itemCount: '8 items Dry Clean',
-    status: 'processing',
-    totalAmount: 480,
-  },
-  {
-    id: 'ORD003',
-    customerName: 'Amit Patel',
-    phoneNumber: '+91 76543 21098',
-    pickupAddress: 'C/401, Green Valley, Near Shela',
-    pickupDate: '2025-01-09',
-    pickupTime: '4:30 PM',
-    itemCount: '3 kg Premium Wash',
-    status: 'dispatched',
-    totalAmount: 180,
-  },
-];
+import { getPartnerOrders, updateOrderStatus } from '@/utils/api';
+// import { getPartnerOrders, updateOrderStatus } from '@/utils/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router } from 'expo-router';
 
 export default function DashboardScreen() {
-  const [orders, setOrders] = useState<Order[]>(mockOrders);
-  const [activeTab, setActiveTab] = useState<'pending' | 'processing' | 'dispatched'>('pending');
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [activeTab, setActiveTab] = useState<'pending' | 'in_process' | 'out_for_delivery'>('pending');
   const [refreshing, setRefreshing] = useState(false);
-  const [notifications, setNotifications] = useState(2);
+  const [notifications, setNotifications] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
-  const filteredOrders = orders.filter(order => order.status === activeTab && (
-    order.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    order.customerName.toLowerCase().includes(searchQuery.toLowerCase())
-  ));
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
+  const checkAuth = async () => {
+    const token = await AsyncStorage.getItem('token');
+    if (!token) {
+      setIsAuthenticated(false);
+    } else {
+      setIsAuthenticated(true);
+      fetchOrders();
+    }
+  };
+
+  const fetchOrders = async () => {
+    setLoading(true);
+    try {
+      const data = await getPartnerOrders();
+      setOrders(data.orders || []);
+    } catch (e) {
+      Alert.alert('Error', 'Failed to load orders');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
 
   const onRefresh = async () => {
     setRefreshing(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setRefreshing(false);
+    await fetchOrders();
   };
 
-  const handleApprove = (orderId: string) => {
-    Alert.alert(
-      'Approve Order',
-      'Are you sure you want to approve this order?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Approve',
-          onPress: () => {
-            setOrders(prev =>
-              prev.map(order =>
-                order.id === orderId ? { ...order, status: 'processing' } : order
-              )
-            );
-            Alert.alert('Success', 'Order approved successfully!');
-          },
-        },
-      ]
-    );
+  const handleApprove = async (orderId: string) => {
+    try {
+      await updateOrderStatus(orderId, { status: 'confirmed' });
+      fetchOrders();
+      Alert.alert('Success', 'Order approved successfully!');
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to approve order');
+    }
   };
 
-  const handleReject = (orderId: string) => {
-    Alert.alert(
-      'Reject Order',
-      'Are you sure you want to reject this order?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reject',
-          style: 'destructive',
-          onPress: () => {
-            setOrders(prev =>
-              prev.map(order =>
-                order.id === orderId ? { ...order, status: 'rejected' } : order
-              )
-            );
-            Alert.alert('Success', 'Order rejected successfully!');
-          },
-        },
-      ]
-    );
+  const handleReject = async (orderId: string) => {
+    try {
+      await updateOrderStatus(orderId, { status: 'rejected' });
+      fetchOrders();
+      Alert.alert('Success', 'Order rejected successfully!');
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to reject order');
+    }
   };
 
-  const handleMarkReady = (orderId: string) => {
-    Alert.alert(
-      'Mark as Ready',
-      'Mark this order as ready for dispatch?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Mark Ready',
-          onPress: () => {
-            setOrders(prev =>
-              prev.map(order =>
-                order.id === orderId ? { ...order, status: 'dispatched' } : order
-              )
-            );
-            Alert.alert('Success', 'Order marked as ready for dispatch!');
-          },
-        },
-      ]
-    );
+  const handleMarkReady = async (orderId: string) => {
+    try {
+      await updateOrderStatus(orderId, { status: 'ready_for_delivery' });
+      fetchOrders();
+      Alert.alert('Success', 'Order marked as ready for delivery!');
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to mark as ready');
+    }
   };
 
   const handleMarkDelivered = (orderId: string) => {
@@ -166,7 +122,7 @@ export default function DashboardScreen() {
   };
 
   const renderTabButton = (
-    tab: 'pending' | 'processing' | 'dispatched',
+    tab: 'pending' | 'in_process' | 'out_for_delivery',
     title: string
   ) => (
     <TouchableOpacity
@@ -183,6 +139,31 @@ export default function DashboardScreen() {
       )}
     </TouchableOpacity>
   );
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Text style={{textAlign: 'center', marginTop: 40}}>Loading...</Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (isAuthenticated === false) {
+    // Not logged in, redirect to login
+    setTimeout(() => {
+      router.replace('/login');
+    }, 100);
+    return (
+      <SafeAreaView style={styles.container}>
+        <Text style={{textAlign: 'center', marginTop: 40}}>Redirecting to login...</Text>
+      </SafeAreaView>
+    );
+  }
+
+  const filteredOrders = orders.filter(order => order.status === activeTab && (
+    order.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    order.customerName.toLowerCase().includes(searchQuery.toLowerCase())
+  ));
 
   return (
     <SafeAreaView style={styles.container}>
@@ -205,8 +186,8 @@ export default function DashboardScreen() {
 
       <View style={styles.tabContainer}>
         {renderTabButton('pending', 'Pending')}
-        {renderTabButton('processing', 'Processing')}
-        {renderTabButton('dispatched', 'Out for Delivery')}
+        {renderTabButton('in_process', 'Processing')}
+        {renderTabButton('out_for_delivery', 'Out for Delivery')}
       </View>
 
       <FlatList

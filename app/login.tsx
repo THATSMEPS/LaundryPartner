@@ -14,19 +14,16 @@ import { router } from 'expo-router';
 import { Eye, EyeOff, Truck } from 'lucide-react-native';
 import { theme } from '@/constants/theme';
 import Button from '@/components/Button';
+import { loginPartner, getAreas } from '@/utils/api';
+import { setItem } from '@/utils/storage';
+import { validateEmail } from '@/utils/validation';
 
 export default function LoginScreen() {
-  const [isLogin, setIsLogin] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
-    businessName: '',
-    ownerName: '',
     email: '',
-    phone: '',
     password: '',
-    confirmPassword: '',
   });
 
   const handleInputChange = (field: string, value: string) => {
@@ -38,37 +35,28 @@ export default function LoginScreen() {
       Alert.alert('Error', 'Please fill in all required fields');
       return false;
     }
-
-    if (!isLogin) {
-      if (!formData.businessName || !formData.ownerName || !formData.phone) {
-        Alert.alert('Error', 'Please fill in all required fields');
-        return false;
-      }
-      if (formData.password !== formData.confirmPassword) {
-        Alert.alert('Error', 'Passwords do not match');
-        return false;
-      }
-      if (formData.password.length < 6) {
-        Alert.alert('Error', 'Password must be at least 6 characters');
-        return false;
-      }
+    if (!validateEmail(formData.email)) {
+      Alert.alert('Error', 'Please enter a valid email address');
+      return false;
     }
-
     return true;
   };
 
   const handleSubmit = async () => {
     if (!validateForm()) return;
-
     setLoading(true);
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Navigate to tabs
+      const authRes = await loginPartner({ email: formData.email, password: formData.password });
+      const { token, partner } = authRes.data || authRes;
+      await setItem('token', token);
+      await setItem('partner', partner);
+      try {
+        const res = await getAreas();
+        await setItem('areas', res.data || res);
+      } catch {}
       router.replace('/(tabs)');
-    } catch (error) {
-      Alert.alert('Error', 'Something went wrong. Please try again.');
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -85,50 +73,9 @@ export default function LoginScreen() {
             <Truck size={48} color={theme.colors.primary} />
           </View>
           <Text style={styles.title}>Laundry Partner</Text>
-          <Text style={styles.subtitle}>
-            {isLogin ? 'Welcome back!' : 'Join our partner network'}
-          </Text>
+          <Text style={styles.subtitle}>Welcome back!</Text>
         </View>
-
         <View style={styles.form}>
-          {!isLogin && (
-            <>
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Business Name</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.businessName}
-                  onChangeText={(value) => handleInputChange('businessName', value)}
-                  placeholder="Enter your business name"
-                  placeholderTextColor={theme.colors.textSecondary}
-                />
-              </View>
-
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Owner's Name</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.ownerName}
-                  onChangeText={(value) => handleInputChange('ownerName', value)}
-                  placeholder="Enter owner's name"
-                  placeholderTextColor={theme.colors.textSecondary}
-                />
-              </View>
-
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Phone Number</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.phone}
-                  onChangeText={(value) => handleInputChange('phone', value)}
-                  placeholder="Enter phone number"
-                  placeholderTextColor={theme.colors.textSecondary}
-                  keyboardType="phone-pad"
-                />
-              </View>
-            </>
-          )}
-
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Email</Text>
             <TextInput
@@ -141,7 +88,6 @@ export default function LoginScreen() {
               autoCapitalize="none"
             />
           </View>
-
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Password</Text>
             <View style={styles.passwordContainer}>
@@ -165,49 +111,19 @@ export default function LoginScreen() {
               </TouchableOpacity>
             </View>
           </View>
-
-          {!isLogin && (
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>Confirm Password</Text>
-              <View style={styles.passwordContainer}>
-                <TextInput
-                  style={styles.passwordInput}
-                  value={formData.confirmPassword}
-                  onChangeText={(value) => handleInputChange('confirmPassword', value)}
-                  placeholder="Confirm your password"
-                  placeholderTextColor={theme.colors.textSecondary}
-                  secureTextEntry={!showConfirmPassword}
-                />
-                <TouchableOpacity
-                  style={styles.eyeButton}
-                  onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                >
-                  {showConfirmPassword ? (
-                    <EyeOff size={20} color={theme.colors.textSecondary} />
-                  ) : (
-                    <Eye size={20} color={theme.colors.textSecondary} />
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-
           <Button
-            title={isLogin ? 'Sign In' : 'Create Account'}
+            title="Sign In"
             onPress={handleSubmit}
             loading={loading}
             style={styles.submitButton}
           />
-
           <TouchableOpacity
             style={styles.switchButton}
-            onPress={() => setIsLogin(!isLogin)}
+            onPress={() => router.replace('/signup')}
           >
             <Text style={styles.switchText}>
-              {isLogin ? "Don't have an account? " : 'Already have an account? '}
-              <Text style={styles.switchTextBold}>
-                {isLogin ? 'Sign Up' : 'Sign In'}
-              </Text>
+              Don't have an account?{' '}
+              <Text style={styles.switchTextBold}>Sign Up</Text>
             </Text>
           </TouchableOpacity>
         </View>

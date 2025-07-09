@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,128 +8,141 @@ import {
   TextInput,
   Modal,
   SafeAreaView,
+  ScrollView,
 } from 'react-native';
-import { Search, Filter, Download, Eye, X } from 'lucide-react-native';
+import { Filter, Download, Eye, X } from 'lucide-react-native';
 import { theme } from '@/constants/theme';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
+import { getPartnerOrders, getPartnerProfile } from '@/utils/api';
+import { usePartnerProfile } from '@/hooks/usePartnerProfile';
 
 interface HistoryOrder {
   id: string;
   customerName: string;
   phoneNumber: string;
   pickupAddress: string;
-  completedDate: string;
+  deliveredDate: string;
   totalAmount: number;
-  status: 'completed' | 'rejected' | 'cancelled';
+  status: 'delivered' | 'rejected' | 'failed';
   services: string[];
   paymentStatus: 'paid' | 'unpaid';
   rating?: number;
   feedback?: string;
 }
 
-const mockHistoryOrders: HistoryOrder[] = [
-  {
-    id: 'ORD001',
-    customerName: 'Rajesh Kumar',
-    phoneNumber: '+91 98765 43210',
-    pickupAddress: 'A/203, Shela Garden, Ahmedabad',
-    completedDate: '2025-01-08',
-    totalAmount: 250,
-    status: 'completed',
-    services: ['Wash & Fold (5kg)', 'Starch'],
-    paymentStatus: 'paid',
-    rating: 4.5,
-    feedback: 'Great service, very satisfied!',
-  },
-  {
-    id: 'ORD002',
-    customerName: 'Priya Sharma',
-    phoneNumber: '+91 87654 32109',
-    pickupAddress: 'B/105, Maple Heights, Shela',
-    completedDate: '2025-01-07',
-    totalAmount: 480,
-    status: 'completed',
-    services: ['Dry Clean (8 pieces)', 'Premium Packaging'],
-    paymentStatus: 'paid',
-    rating: 5.0,
-    feedback: 'Excellent quality and quick delivery!',
-  },
-  {
-    id: 'ORD003',
-    customerName: 'Amit Patel',
-    phoneNumber: '+91 76543 21098',
-    pickupAddress: 'C/401, Green Valley, Near Shela',
-    completedDate: '2025-01-06',
-    totalAmount: 120,
-    status: 'rejected',
-    services: ['Express Wash'],
-    paymentStatus: 'unpaid',
-  },
-  {
-    id: 'ORD004',
-    customerName: 'Neha Gupta',
-    phoneNumber: '+91 65432 10987',
-    pickupAddress: 'D/102, Sunrise Apartments, Shela',
-    completedDate: '2025-01-05',
-    totalAmount: 350,
-    status: 'completed',
-    services: ['Ethnic Wear Cleaning (6 pieces)', 'Special Care'],
-    paymentStatus: 'paid',
-    rating: 4.8,
-  },
-];
-
+// 1. Update statusFilters to have first letter capitalized in label
 const statusFilters = [
   { key: 'all', label: 'All Orders' },
-  { key: 'completed', label: 'Completed' },
+  { key: 'delivered', label: 'Delivered' },
   { key: 'rejected', label: 'Rejected' },
-  { key: 'cancelled', label: 'Cancelled' },
+  { key: 'failed', label: 'Failed' },
 ];
 
 export default function HistoryScreen() {
-  const [orders, setOrders] = useState<HistoryOrder[]>(mockHistoryOrders);
+  const [orders, setOrders] = useState<HistoryOrder[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedStatus, setSelectedStatus] = useState('all');
+  // 2. Set default selectedStatus to 'all' so All Orders is selected by default
+  const [selectedStatus, setSelectedStatus] = useState('all'); // Default to All Orders
   const [selectedOrder, setSelectedOrder] = useState<HistoryOrder | null>(null);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
+  const [invoiceModalVisible, setInvoiceModalVisible] = useState(false);
+  const [invoiceOrder, setInvoiceOrder] = useState<HistoryOrder | null>(null);
+  const { profile: partnerProfile, saveProfile } = usePartnerProfile();
 
+  // Fetch and update partner profile on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await getPartnerProfile();
+        if (res && res.data) {
+          // Map backend fields to PartnerProfile shape if needed
+          const apiData = res.data;
+          const mappedProfile = {
+            businessName: apiData.name || '',
+            // name: apiData.name || '',
+            email: apiData.email || '',
+            phone: apiData.mobile || '',
+            address: apiData.address || '',
+            serviceArea: apiData.areaId || '',
+            ...apiData,
+          };
+          await saveProfile(mappedProfile);
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
+  }, []);
+
+  const fetchOrders = async (status: string) => {
+    try {
+      let params = '';
+      if (status && status !== 'all') params = `status=${status}`;
+      const res = await getPartnerOrders(params);
+      // Map backend order data to HistoryOrder interface
+      const backendOrders = (res.data?.orders || res.orders || []);
+      const mappedOrders: HistoryOrder[] = backendOrders.map((order: any) => ({
+        id: order.id,
+        customerName: order.customer?.name || 'N/A',
+        phoneNumber: order.customer?.phone || '',
+        pickupAddress: order.pickupAddress || '',
+        deliveredDate: order.deliveredAt || order.placedAt || '',
+        totalAmount: order.totalAmount || 0,
+        status: order.status === 'delivered' || order.status === 'failed' || order.status === 'rejected' ? order.status : 'delivered',
+        services: order.items?.map((item: any) => item.laundryItem?.name || item.name) || [],
+        paymentStatus: order.paymentStatus || 'paid',
+        rating: order.rating,
+        feedback: order.feedback,
+      }));
+      setOrders(mappedOrders);
+    } catch (e) {
+      setOrders([]);
+    }
+  };
+
+  useEffect(() => {
+    fetchOrders(selectedStatus);
+  }, [selectedStatus]);
+
+  // Only show delivered, failed, or rejected orders
   const filteredOrders = orders.filter(order => {
+    // Only delivered, failed, or rejected
+    const isRelevantStatus = order.status === 'delivered' || order.status === 'rejected' || order.status === 'failed';
+    if (selectedStatus === 'all') {
+      if (
+      order.status !== 'delivered' &&
+      order.status !== 'rejected' &&
+      order.status !== 'failed'
+    ) return false;
+    } else {
+      if (order.status !== selectedStatus) return false;
+    }
     const matchesSearch = 
       order.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
       order.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       order.services.some(service => service.toLowerCase().includes(searchQuery.toLowerCase()));
-    
-    const matchesStatus = selectedStatus === 'all' || order.status === selectedStatus;
-    
-    return matchesSearch && matchesStatus;
+    return matchesSearch;
   });
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'completed':
+      case 'delivered':
         return theme.colors.success;
       case 'rejected':
         return theme.colors.error;
-      case 'cancelled':
+      case 'failed':
         return theme.colors.warning;
       default:
         return theme.colors.textSecondary;
     }
   };
 
+  // 3. Update getStatusText to always return first letter capitalized
   const getStatusText = (status: string) => {
-    switch (status) {
-      case 'completed':
-        return 'Completed';
-      case 'rejected':
-        return 'Rejected';
-      case 'cancelled':
-        return 'Cancelled';
-      default:
-        return status;
-    }
+    if (!status) return status;
+    return status.charAt(0).toUpperCase() + status.slice(1);
   };
 
   const handleOrderDetail = (order: HistoryOrder) => {
@@ -137,59 +150,70 @@ export default function HistoryScreen() {
     setDetailModalVisible(true);
   };
 
-  const renderOrderCard = ({ item }: { item: HistoryOrder }) => (
-    <Card style={styles.orderCard}>
-      <View style={styles.orderHeader}>
-        <Text style={styles.orderId}>#{item.id}</Text>
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
-          <Text style={styles.statusText}>{getStatusText(item.status)}</Text>
-        </View>
-      </View>
+  const handleInvoice = (order: HistoryOrder) => {
+    setInvoiceOrder(order);
+    setInvoiceModalVisible(true);
+  };
 
-      <Text style={styles.customerName}>{item.customerName}</Text>
-      <Text style={styles.completedDate}>Completed: {item.completedDate}</Text>
-
-      <View style={styles.orderDetails}>
-        <Text style={styles.servicesText}>
-          {item.services.join(', ')}
-        </Text>
-        <View style={styles.amountContainer}>
-          <Text style={styles.amount}>₹{item.totalAmount}</Text>
-          <View style={[
-            styles.paymentBadge,
-            { backgroundColor: item.paymentStatus === 'paid' ? theme.colors.success : theme.colors.warning }
-          ]}>
-            <Text style={styles.paymentText}>{item.paymentStatus.toUpperCase()}</Text>
+  const renderOrderCard = ({ item }: { item: HistoryOrder }) => {
+    // Truncate order id after first hyphen
+    const truncatedOrderId = item.id.includes('-') ? item.id.split('-')[0] : item.id;
+    // Format date/time nicely (e.g. 07 Jul 2025, 10:30 AM)
+    let formattedDate = '';
+    if (item.deliveredDate) {
+      const dateObj = new Date(item.deliveredDate);
+      if (!isNaN(dateObj.getTime())) {
+        formattedDate = dateObj.toLocaleString('en-IN', {
+          day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true
+        });
+      } else {
+        formattedDate = item.deliveredDate;
+      }
+    }
+    return (
+      <Card style={styles.orderCard}>
+        {/* Name and status badge on same row */}
+        <View style={styles.nameStatusRow}>
+          <Text style={[styles.orderCustomerName, { textTransform: 'capitalize' }]}>{item.customerName}</Text>
+          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}> 
+            <Text style={styles.statusText}>{getStatusText(item.status)}</Text>
           </View>
         </View>
-      </View>
-
-      {item.rating && (
-        <View style={styles.ratingContainer}>
-          <Text style={styles.ratingText}>★ {item.rating}</Text>
-          {item.feedback && (
-            <Text style={styles.feedbackText} numberOfLines={2}>
-              "{item.feedback}"
-            </Text>
-          )}
+        <Text style={styles.orderIdSmall}>#{truncatedOrderId}</Text>
+        <Text style={styles.deliveredDate}>{formattedDate}</Text>
+        <View style={styles.orderDetails}>
+          <Text style={styles.servicesText}>{item.services.join(', ')}</Text>
+          <View style={styles.amountContainer}>
+            <Text style={styles.amountSmall}>₹{item.totalAmount}</Text>
+            {/* Removed payment status badge */}
+          </View>
         </View>
-      )}
-
-      <View style={styles.orderFooter}>
-        <TouchableOpacity
-          style={styles.detailButton}
-          onPress={() => handleOrderDetail(item)}
-        >
-          <Eye size={16} color={theme.colors.primary} />
-          <Text style={styles.detailButtonText}>View Details</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.downloadButton}>
-          <Download size={16} color={theme.colors.secondary} />
-          <Text style={styles.downloadButtonText}>Invoice</Text>
-        </TouchableOpacity>
-      </View>
-    </Card>
-  );
+        {item.rating && (
+          <View style={styles.ratingContainer}>
+            <Text style={styles.ratingText}>★ {item.rating}</Text>
+            {item.feedback && (
+              <Text style={styles.feedbackText} numberOfLines={2}>
+                "{item.feedback}"
+              </Text>
+            )}
+          </View>
+        )}
+        <View style={styles.orderFooter}>
+          <TouchableOpacity
+            style={styles.detailButton}
+            onPress={() => handleOrderDetail(item)}
+          >
+            <Eye size={16} color={theme.colors.primary} />
+            <Text style={styles.detailButtonText}>View Details</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.invoiceButton} onPress={() => handleInvoice(item)}>
+            <Download size={16} color={theme.colors.primary} />
+            <Text style={styles.detailButtonText}>Invoice</Text>
+          </TouchableOpacity>
+        </View>
+      </Card>
+    );
+  };
 
   const renderFilterButton = (filter: typeof statusFilters[0]) => (
     <TouchableOpacity
@@ -211,28 +235,67 @@ export default function HistoryScreen() {
     </TouchableOpacity>
   );
 
+  // Helper function to convert number to words (Indian system, with paise)
+  function numberToWordsWithPaise(amount: number): string {
+    if (isNaN(amount)) return '';
+    const num = Math.floor(amount);
+    const paise = Math.round((amount * 100) % 100);
+    const a = [ '', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen' ];
+    const b = [ '', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety' ];
+    let str = '';
+    let n = num;
+    if (n > 99999999) return amount.toString(); // too big
+    let crore = Math.floor(n / 10000000);
+    n = n % 10000000;
+    let lakh = Math.floor(n / 100000);
+    n = n % 100000;
+    let thousand = Math.floor(n / 1000);
+    n = n % 1000;
+    let hundred = Math.floor(n / 100);
+    n = n % 100;
+    if (crore) str += a[crore] + ' crore ';
+    if (lakh) str += a[lakh] + ' lakh ';
+    if (thousand) str += a[thousand] + ' thousand ';
+    if (hundred) str += a[hundred] + ' hundred ';
+    if (num > 0 && (num % 100) > 0) {
+      if (str !== '') str += 'and ';
+      if (n < 20) str += a[n];
+      else str += b[Math.floor(n / 10)] + (n % 10 ? ' ' + a[n % 10] : '');
+    }
+    str = str.trim();
+    let rupeesPart = str ? str + ' rupees' : '';
+    let paisePart = '';
+    if (paise > 0) {
+      if (paise < 20) paisePart = a[paise] + ' paise';
+      else paisePart = b[Math.floor(paise / 10)] + (paise % 10 ? ' ' + a[paise % 10] : '') + ' paise';
+    }
+    if (rupeesPart && paisePart) return rupeesPart + ' and ' + paisePart;
+    if (rupeesPart) return rupeesPart;
+    if (paisePart) return paisePart;
+    return 'zero rupees';
+  }
+
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
+      {/* Header and search/filter on same line, less padding */}
+      <View style={styles.headerRow}>
         <Text style={styles.title}>Order History</Text>
-        <TouchableOpacity
-          style={styles.filterButton}
-          onPress={() => setFilterModalVisible(true)}
-        >
-          <Filter size={20} color={theme.colors.primary} />
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.searchContainer}>
-        <View style={styles.searchBar}>
-          <Search size={20} color={theme.colors.textSecondary} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search by Order ID, Customer, or Service"
-            placeholderTextColor={theme.colors.textSecondary}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
+        <View style={styles.searchFilterRow}>
+          <View style={styles.searchBarInline}>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search by Order ID, Customer, or Service"
+              placeholderTextColor={theme.colors.textSecondary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+          </View>
+          <TouchableOpacity
+            style={styles.filterButton}
+            onPress={() => setFilterModalVisible(true)}
+          >
+            <Filter size={20} color={theme.colors.primary} />
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -297,66 +360,148 @@ export default function HistoryScreen() {
           </View>
 
           {selectedOrder && (
-            <View style={styles.modalContent}>
+            <View style={{ flex: 1 }}>
               <Card style={styles.detailCard}>
-                <View style={styles.detailHeader}>
-                  <Text style={styles.detailOrderId}>#{selectedOrder.id}</Text>
-                  <View style={[styles.statusBadge, { backgroundColor: getStatusColor(selectedOrder.status) }]}>
-                    <Text style={styles.statusText}>{getStatusText(selectedOrder.status)}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.detailSection}>
-                  <Text style={styles.detailSectionTitle}>Customer Information</Text>
-                  <Text style={styles.detailText}>Name: {selectedOrder.customerName}</Text>
-                  <Text style={styles.detailText}>Phone: {selectedOrder.phoneNumber}</Text>
-                  <Text style={styles.detailText}>Address: {selectedOrder.pickupAddress}</Text>
-                </View>
-
-                <View style={styles.detailSection}>
-                  <Text style={styles.detailSectionTitle}>Order Information</Text>
-                  <Text style={styles.detailText}>Services:</Text>
-                  {selectedOrder.services.map((service, index) => (
-                    <Text key={index} style={styles.serviceItem}>• {service}</Text>
-                  ))}
-                  <Text style={styles.detailText}>Completed: {selectedOrder.completedDate}</Text>
-                </View>
-
-                <View style={styles.detailSection}>
-                  <Text style={styles.detailSectionTitle}>Payment Information</Text>
-                  <Text style={styles.detailText}>Total Amount: ₹{selectedOrder.totalAmount}</Text>
-                  <Text style={styles.detailText}>
-                    Payment Status: {selectedOrder.paymentStatus.toUpperCase()}
-                  </Text>
-                </View>
-
-                {selectedOrder.rating && (
+                <ScrollView contentContainerStyle={styles.detailScrollContent} showsVerticalScrollIndicator={false}>
+                  {/* Customer Information first */}
                   <View style={styles.detailSection}>
-                    <Text style={styles.detailSectionTitle}>Customer Feedback</Text>
-                    <Text style={styles.detailText}>Rating: ★ {selectedOrder.rating}/5</Text>
-                    {selectedOrder.feedback && (
-                      <Text style={styles.detailText}>Feedback: "{selectedOrder.feedback}"</Text>
-                    )}
+                    <Text style={styles.detailSectionTitleSmall}>Customer Information</Text>
+                    <Text style={styles.detailTextSmall}>Name: {selectedOrder.customerName}</Text>
+                    <Text style={styles.detailTextSmall}>Phone: {selectedOrder.phoneNumber}</Text>
+                    <Text style={styles.detailTextSmall}>Address: {selectedOrder.pickupAddress}</Text>
                   </View>
-                )}
+                  {/* Order Information */}
+                  <View style={styles.detailSection}>
+                    <Text style={styles.detailSectionTitleSmall}>Order Information</Text>
+                    {/* Truncate order id after first hyphen */}
+                    <Text style={styles.detailTextSmall}>Order ID: {selectedOrder.id.includes('-') ? selectedOrder.id.split('-')[0] : selectedOrder.id}</Text>
+                    <Text style={styles.detailTextSmall}>Services:</Text>
+                    {selectedOrder.services.map((service, index) => (
+                      <Text key={index} style={styles.serviceItemSmall}>• {service}</Text>
+                    ))}
+                    {/* Format date/time nicely */}
+                    <Text style={styles.detailTextSmall}>Date: {(() => {
+                      const dateObj = new Date(selectedOrder.deliveredDate);
+                      if (!isNaN(dateObj.getTime())) {
+                        return dateObj.toLocaleString('en-IN', {
+                          day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true
+                        });
+                      } else {
+                        return selectedOrder.deliveredDate;
+                      }
+                    })()}</Text>
+                  </View>
+                  {/* Payment Information */}
+                  <View style={styles.detailSection}>
+                    <Text style={styles.detailSectionTitleSmall}>Payment Information</Text>
+                    <Text style={styles.detailTextSmall}>Total Amount: ₹{selectedOrder.totalAmount}</Text>
+                    <Text style={styles.detailTextSmall}>
+                      Payment Status: {selectedOrder.paymentStatus.toUpperCase()}
+                    </Text>
+                  </View>
+                  {/* Feedback */}
+                  {selectedOrder.rating && (
+                    <View style={styles.detailSection}>
+                      <Text style={styles.detailSectionTitleSmall}>Customer Feedback</Text>
+                      <Text style={styles.detailTextSmall}>Rating: ★ {selectedOrder.rating}/5</Text>
+                      {selectedOrder.feedback && (
+                        <Text style={styles.detailTextSmall}>Feedback: "{selectedOrder.feedback}"</Text>
+                      )}
+                    </View>
+                  )}
+                </ScrollView>
               </Card>
             </View>
           )}
 
           <View style={styles.modalFooter}>
-            <Button
-              title="Download Invoice"
-              onPress={() => console.log('Download invoice')}
-              variant="outline"
-              style={styles.modalButton}
-            />
-            <Button
-              title="Close"
-              onPress={() => setDetailModalVisible(false)}
-              style={styles.modalButton}
-            />
+            <View style={styles.modalFooterRow}>
+              <TouchableOpacity
+                style={styles.invoiceButton}
+                onPress={() => console.log('Download invoice')}
+              >
+                <Download size={16} color={theme.colors.primary} />
+                <Text style={styles.detailButtonText}>Invoice</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.invoiceButton}
+                onPress={() => setDetailModalVisible(false)}
+              >
+                <Text style={styles.detailButtonText}>Close</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </SafeAreaView>
+      </Modal>
+
+      {/* Invoice Modal */}
+      <Modal
+        visible={invoiceModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setInvoiceModalVisible(false)}
+      >
+        <View style={styles.invoiceModalOverlay}>
+          <View style={styles.invoiceModalContent}>
+            <ScrollView contentContainerStyle={styles.invoiceScrollContent} showsVerticalScrollIndicator={false}>
+              <Text style={styles.invoiceCompanyName}>{partnerProfile?.name || partnerProfile?.businessName || 'Laundry Partner'}</Text>
+              <View style={styles.invoiceHeaderRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.invoiceLabel}>Name:</Text>
+                  <Text style={styles.invoiceValue}>{invoiceOrder?.customerName || ''}</Text>
+                  <Text style={styles.invoiceLabel}>Address:</Text>
+                  <Text style={styles.invoiceValue}>{invoiceOrder?.pickupAddress || ''}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.invoiceLabel}>Invoice No:</Text>
+                  <Text style={styles.invoiceValue}>{invoiceOrder ? (invoiceOrder.id.includes('-') ? invoiceOrder.id.split('-')[0] : invoiceOrder.id) : ''}</Text>
+                  <Text style={styles.invoiceLabel}>Invoice Date:</Text>
+                  <Text style={styles.invoiceValue}>{invoiceOrder ? (() => {
+                    const dateObj = new Date(invoiceOrder.deliveredDate);
+                    if (!isNaN(dateObj.getTime())) {
+                      return dateObj.toLocaleString('en-IN', {
+                        day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true
+                      });
+                    } else {
+                      return invoiceOrder.deliveredDate;
+                    }
+                  })() : ''}</Text>
+                </View>
+              </View>
+              <View style={styles.invoiceTableHeader}>
+                <Text style={styles.invoiceTableCellSN}>S.No:</Text>
+                <Text style={styles.invoiceTableCellDesc}>Description</Text>
+                <Text style={styles.invoiceTableCellQty}>Qty</Text>
+                <Text style={styles.invoiceTableCellRate}>Rate</Text>
+                <Text style={styles.invoiceTableCellAmt}>Amount</Text>
+              </View>
+              {/* Only one row for all services, as per available data */}
+              {invoiceOrder && invoiceOrder.services.map((service, idx) => (
+                <View style={styles.invoiceTableRow} key={idx}>
+                  <Text style={styles.invoiceTableCellSN}>{idx + 1}</Text>
+                  <Text style={styles.invoiceTableCellDesc}>{service}</Text>
+                  <Text style={styles.invoiceTableCellQty}>1</Text>
+                  <Text style={styles.invoiceTableCellRate}>{invoiceOrder.totalAmount}</Text>
+                  <Text style={styles.invoiceTableCellAmt}>{invoiceOrder.totalAmount}</Text>
+                </View>
+              ))}
+              <View style={styles.invoiceTableFooter}>
+                <Text style={styles.invoiceTableCellSN}></Text>
+                <Text style={styles.invoiceTableCellDesc}></Text>
+                <Text style={styles.invoiceTableCellQty}></Text>
+                <Text style={styles.invoiceTableCellRate}>Total</Text>
+                <Text style={styles.invoiceTableCellAmt}>{invoiceOrder?.totalAmount || ''}</Text>
+              </View>
+              <Text style={styles.invoiceRupees}>
+                Rupees in Word: {invoiceOrder && invoiceOrder.totalAmount !== undefined ? numberToWordsWithPaise(invoiceOrder.totalAmount) + ' only' : ''}
+              </Text>
+              <Text style={styles.invoiceTerms}>Terms and Conditions</Text>
+            </ScrollView>
+            <TouchableOpacity style={styles.invoiceCloseButton} onPress={() => setInvoiceModalVisible(false)}>
+              <Text style={styles.invoiceCloseButtonText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -367,22 +512,43 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: theme.spacing.lg,
+  headerRow: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.lg,
+    paddingBottom: theme.spacing.sm, // less padding below heading
     backgroundColor: theme.colors.white,
-    ...theme.shadows.sm,
+    flexDirection: 'column',
   },
   title: {
     ...theme.typography.h2,
     color: theme.colors.textPrimary,
   },
+  searchFilterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+    marginTop: theme.spacing.sm,
+  },
+  searchBarInline: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.borderRadius.md,
+    paddingVertical: 0,
+    paddingHorizontal: theme.spacing.md,
+    height: 48, // match filterButton height
+    minWidth: 0,
+  },
   filterButton: {
-    padding: theme.spacing.sm,
+    width: 48,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 0,
     borderRadius: theme.borderRadius.sm,
     backgroundColor: theme.colors.surface,
+    marginLeft: theme.spacing.sm,
   },
   searchContainer: {
     padding: theme.spacing.lg,
@@ -407,16 +573,27 @@ const styles = StyleSheet.create({
   orderCard: {
     marginHorizontal: theme.spacing.lg,
     marginVertical: theme.spacing.sm,
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.md,
   },
-  orderHeader: {
+  nameStatusRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: theme.spacing.sm,
+    justifyContent: 'space-between',
+    marginBottom: 2,
   },
-  orderId: {
-    ...theme.typography.h3,
+  orderCustomerName: {
+    ...theme.typography.body,
     color: theme.colors.primary,
+    fontWeight: '700',
+    marginBottom: 0,
+    marginTop: 0,
+  },
+  orderIdSmall: {
+    ...theme.typography.caption,
+    color: theme.colors.textSecondary,
+    marginBottom: 0,
+    marginTop: 2,
   },
   statusBadge: {
     paddingHorizontal: theme.spacing.sm,
@@ -428,38 +605,41 @@ const styles = StyleSheet.create({
     color: theme.colors.white,
     fontWeight: '600',
   },
-  customerName: {
-    ...theme.typography.body,
-    color: theme.colors.textPrimary,
-    fontWeight: '600',
-    marginBottom: theme.spacing.xs,
-  },
-  completedDate: {
+  deliveredDate: {
     ...theme.typography.bodySmall,
     color: theme.colors.textSecondary,
-    marginBottom: theme.spacing.md,
+    marginBottom: 2,
+    marginTop: 2,
   },
   orderDetails: {
-    marginBottom: theme.spacing.md,
+    marginBottom: 2,
+    marginTop: 2,
   },
   servicesText: {
     ...theme.typography.bodySmall,
     color: theme.colors.textSecondary,
-    marginBottom: theme.spacing.sm,
+    marginBottom: 2,
+    marginTop: 2,
   },
   amountContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 2,
+    marginTop: 2,
   },
-  amount: {
-    ...theme.typography.h3,
-    color: theme.colors.textPrimary,
+  amountSmall: {
+    ...theme.typography.caption,
+    color: theme.colors.textSecondary,
+    fontWeight: '600',
+    marginBottom: 0,
+    marginTop: 0,
   },
   paymentBadge: {
     paddingHorizontal: theme.spacing.sm,
     paddingVertical: theme.spacing.xs,
     borderRadius: theme.borderRadius.sm,
+    marginLeft: theme.spacing.sm,
   },
   paymentText: {
     ...theme.typography.caption,
@@ -470,24 +650,41 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
     padding: theme.spacing.sm,
     borderRadius: theme.borderRadius.sm,
-    marginBottom: theme.spacing.md,
+    marginBottom: 2,
+    marginTop: 2,
   },
   ratingText: {
     ...theme.typography.bodySmall,
     color: theme.colors.secondary,
     fontWeight: '600',
-    marginBottom: theme.spacing.xs,
+    marginBottom: 2,
+    marginTop: 2,
   },
   feedbackText: {
     ...theme.typography.bodySmall,
     color: theme.colors.textSecondary,
     fontStyle: 'italic',
+    marginBottom: 0,
+    marginTop: 0,
   },
   orderFooter: {
     flexDirection: 'row',
     gap: theme.spacing.sm,
+    marginTop: theme.spacing.sm,
   },
   detailButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: theme.spacing.sm,
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.borderRadius.sm,
+    borderWidth: 1,
+    borderColor: theme.colors.primary,
+    gap: theme.spacing.xs,
+  },
+  invoiceButton: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
@@ -502,23 +699,6 @@ const styles = StyleSheet.create({
   detailButtonText: {
     ...theme.typography.bodySmall,
     color: theme.colors.primary,
-    fontWeight: '600',
-  },
-  downloadButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: theme.spacing.sm,
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.borderRadius.sm,
-    borderWidth: 1,
-    borderColor: theme.colors.secondary,
-    gap: theme.spacing.xs,
-  },
-  downloadButtonText: {
-    ...theme.typography.bodySmall,
-    color: theme.colors.secondary,
     fontWeight: '600',
   },
   emptyContainer: {
@@ -592,40 +772,146 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.white,
     ...theme.shadows.sm,
   },
+  modalFooterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 0,
+    margin: 0,
+    gap: theme.spacing.sm,
+    backgroundColor: theme.colors.white,
+  },
   modalButton: {
     flex: 1,
     marginHorizontal: theme.spacing.sm,
   },
   detailCard: {
-    padding: theme.spacing.lg,
+    padding: theme.spacing.md,
   },
-  detailHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: theme.spacing.lg,
-  },
-  detailOrderId: {
-    ...theme.typography.h2,
-    color: theme.colors.primary,
+  detailScrollContent: {
+    paddingBottom: theme.spacing.lg,
   },
   detailSection: {
-    marginBottom: theme.spacing.lg,
+    marginBottom: theme.spacing.md,
   },
-  detailSectionTitle: {
-    ...theme.typography.h3,
+  detailSectionTitleSmall: {
+    fontSize: 15,
+    fontWeight: '600',
     color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.sm,
-  },
-  detailText: {
-    ...theme.typography.body,
-    color: theme.colors.textSecondary,
     marginBottom: theme.spacing.xs,
   },
-  serviceItem: {
-    ...theme.typography.bodySmall,
+  detailTextSmall: {
+    fontSize: 13,
+    color: theme.colors.textSecondary,
+    marginBottom: 2,
+  },
+  serviceItemSmall: {
+    fontSize: 13,
     color: theme.colors.textSecondary,
     marginLeft: theme.spacing.sm,
-    marginBottom: theme.spacing.xs,
+    marginBottom: 2,
+  },
+  invoiceModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  invoiceModalContent: {
+    width: '92%',
+    backgroundColor: theme.colors.white,
+    borderRadius: 12,
+    padding: theme.spacing.lg,
+    maxHeight: '90%',
+  },
+  invoiceScrollContent: {
+    paddingBottom: theme.spacing.lg,
+  },
+  invoiceCompanyName: {
+    fontWeight: 'bold',
+    fontSize: 18,
+    textAlign: 'left',
+    marginBottom: 8,
+  },
+  invoiceHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  invoiceLabel: {
+    fontWeight: 'bold',
+    fontSize: 13,
+    marginTop: 2,
+  },
+  invoiceValue: {
+    fontSize: 13,
+    marginBottom: 2,
+  },
+  invoiceTableHeader: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderColor: theme.colors.textSecondary,
+    paddingVertical: 4,
+    marginTop: 8,
+  },
+  invoiceTableRow: {
+    flexDirection: 'row',
+    paddingVertical: 2,
+  },
+  invoiceTableFooter: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    borderColor: theme.colors.textSecondary,
+    paddingVertical: 4,
+  },
+  invoiceTableCellSN: {
+    width: 40, // increased from 32
+    fontSize: 12,
+    textAlign: 'left',
+    paddingRight: 4, // add a little space to the right
+  },
+  invoiceTableCellDesc: {
+    flex: 2,
+    fontSize: 12,
+    textAlign: 'left',
+    paddingLeft: 2, // add a little space to the left
+  },
+  invoiceTableCellQty: {
+    width: 32,
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  invoiceTableCellRate: {
+    width: 48,
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  invoiceTableCellAmt: {
+    width: 56,
+    fontSize: 12,
+    textAlign: 'right',
+  },
+  invoiceRupees: {
+    fontSize: 12,
+    marginTop: 12,
+    marginBottom: 2,
+  },
+  invoiceTerms: {
+    fontSize: 11,
+    color: theme.colors.textSecondary,
+    marginBottom: 8,
+  },
+  invoiceCloseButton: {
+    marginTop: 8,
+    alignSelf: 'center',
+    backgroundColor: theme.colors.primary,
+    borderRadius: 6,
+    paddingHorizontal: 24,
+    paddingVertical: 8,
+  },
+  invoiceCloseButtonText: {
+    color: theme.colors.white,
+    fontWeight: 'bold',
+    fontSize: 14,
   },
 });

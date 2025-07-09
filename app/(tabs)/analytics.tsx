@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,11 +7,36 @@ import {
   TouchableOpacity,
   Dimensions,
   SafeAreaView,
+  ActivityIndicator,
 } from 'react-native';
 import { LineChart, BarChart, PieChart } from 'react-native-chart-kit';
-import { CalendarDays, TrendingUp, DollarSign, Package, Clock } from 'lucide-react-native';
+import { CalendarDays, TrendingUp, DollarSign, Package, IndianRupee } from 'lucide-react-native';
 import { theme } from '@/constants/theme';
 import Card from '@/components/Card';
+import { 
+  getRevenueAnalytics, 
+  getOrderAnalytics, 
+  getServiceAnalytics, 
+  getPerformanceMetrics,
+  getPartnerOrders 
+} from '@/utils/api';
+
+// Define Order type (based on your codebase)
+type Order = {
+  id: string;
+  customerName: string;
+  phoneNumber: string;
+  pickupAddress: string;
+  deliveredDate?: string;
+  deliveredAt?: string;
+  placedAt?: string;
+  totalAmount?: number;
+  status: string;
+  services?: string[];
+  paymentStatus?: string;
+  rating?: number;
+  feedback?: string;
+};
 
 const screenWidth = Dimensions.get('window').width;
 
@@ -87,12 +112,185 @@ const serviceBreakdownData = [
 const timeFilters = [
   { key: 'today', label: 'Today' },
   { key: '7days', label: '7 Days' },
-  { key: '30days', label: '30 Days' },
-  { key: 'month', label: 'This Month' },
+  { key: '30days', label: 'This Month' },
+  // { key: 'month', label: 'This Month' },
 ];
 
 export default function AnalyticsScreen() {
-  const [selectedFilter, setSelectedFilter] = useState('7days');
+  const [selectedFilter, setSelectedFilter] = useState<string>('7days');
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [metrics, setMetrics] = useState<{
+    totalRevenue: number;
+    totalOrders: number;
+    avgOrderValue: number;
+    revenueData: any;
+    orderVolumeData: any;
+  }>({
+    totalRevenue: 0,
+    totalOrders: 0,
+    avgOrderValue: 0,
+    revenueData: revenueData,
+    orderVolumeData: orderVolumeData,
+  });
+
+  useEffect(() => {
+    fetchOrders();
+  }, [selectedFilter]);
+
+  const fetchOrders = async () => {
+    setLoading(true);
+    try {
+      const res = await getPartnerOrders();
+      const allOrders = res.data?.orders || res.orders || [];
+      // Only delivered orders
+      const deliveredOrders = allOrders.filter((order: Order) => order.status === 'delivered');
+      // Filter by selectedFilter (date range)
+      const filteredOrders = filterOrdersByTime(deliveredOrders, selectedFilter);
+      // Compute metrics
+      const totalRevenue = filteredOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+      const totalOrders = filteredOrders.length;
+      const avgOrderValue = totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0;
+      const revenueData = computeRevenueTrend(filteredOrders, selectedFilter);
+      const orderVolumeData = computeOrderVolume(filteredOrders, selectedFilter);
+      setMetrics({
+        totalRevenue,
+        totalOrders,
+        avgOrderValue,
+        revenueData,
+        orderVolumeData,
+      });
+      setOrders(filteredOrders);
+    } catch (e) {
+      setMetrics({
+        totalRevenue: 0,
+        totalOrders: 0,
+        avgOrderValue: 0,
+        revenueData: revenueData,
+        orderVolumeData: orderVolumeData,
+      });
+      setOrders([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Helper: filter orders by selected time filter
+  function filterOrdersByTime(orders: Order[], filterKey: string): Order[] {
+    const now = new Date();
+    return orders.filter((order: Order) => {
+      const date = new Date(order.deliveredDate || order.deliveredAt || order.placedAt || '');
+      if (isNaN(date.getTime())) return false;
+      switch (filterKey) {
+        case 'today':
+          return date.toDateString() === now.toDateString();
+        case '7days':
+          return date >= addDays(now, -6);
+        case '30days':
+          return date >= addDays(now, -29);
+        case 'month':
+          return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+        default:
+          return true;
+      }
+    });
+  }
+
+  // Helper: add days to a date
+  function addDays(date: Date, days: number): Date {
+    const d = new Date(date);
+    d.setDate(d.getDate() + days);
+    return d;
+  }
+
+  // Helper: compute revenue trend (by day for 7days/today, by week for 30days/month)
+  function computeRevenueTrend(orders: Order[], filterKey: string) {
+    let labels: string[] = [];
+    let data: number[] = [];
+    const now = new Date();
+    if (filterKey === 'today') {
+      labels = ['Today'];
+      data = [orders.reduce((sum: number, o: Order) => sum + (o.totalAmount || 0), 0)];
+    } else if (filterKey === '7days') {
+      labels = Array.from({ length: 7 }, (_, i) => {
+        const d = addDays(now, -(6 - i));
+        return d.toLocaleDateString('en-IN', { weekday: 'short' });
+      });
+      data = labels.map((_, i) => {
+        const d = addDays(now, -(6 - i));
+        return orders.filter((o: Order) => {
+          const od = new Date(o.deliveredDate || o.deliveredAt || o.placedAt || '');
+          return od.toDateString() === d.toDateString();
+        }).reduce((sum: number, o: Order) => sum + (o.totalAmount || 0), 0);
+      });
+    } else if (filterKey === '30days' || filterKey === 'month') {
+      labels = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
+      data = [0, 0, 0, 0];
+      orders.forEach((o: Order) => {
+        const od = new Date(o.deliveredDate || o.deliveredAt || o.placedAt || '');
+        const diff = Math.floor((now.getTime() - od.getTime()) / (1000 * 60 * 60 * 24));
+        if (diff < 0 || diff > 29) return;
+        const week = Math.floor(diff / 7);
+        data[3 - week] += o.totalAmount || 0;
+      });
+    }
+    return {
+      labels,
+      datasets: [
+        {
+          data,
+          color: (opacity = 1) => `rgba(0, 121, 107, ${opacity})`,
+          strokeWidth: 3,
+        },
+      ],
+    };
+  }
+
+  // Helper: compute order volume (by week for 30days/month, by day for 7days/today)
+  function computeOrderVolume(orders: Order[], filterKey: string) {
+    let labels: string[] = [];
+    let data: number[] = [];
+    const now = new Date();
+    if (filterKey === 'today') {
+      labels = ['Today'];
+      data = [orders.length];
+    } else if (filterKey === '7days') {
+      labels = Array.from({ length: 7 }, (_, i) => {
+        const d = addDays(now, -(6 - i));
+        return d.toLocaleDateString('en-IN', { weekday: 'short' });
+      });
+      data = labels.map((_, i) => {
+        const d = addDays(now, -(6 - i));
+        return orders.filter((o: Order) => {
+          const od = new Date(o.deliveredDate || o.deliveredAt || o.placedAt || '');
+          return od.toDateString() === d.toDateString();
+        }).length;
+      });
+    } else if (filterKey === '30days' || filterKey === 'month') {
+      labels = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
+      data = [0, 0, 0, 0];
+      orders.forEach((o: Order) => {
+        const od = new Date(o.deliveredDate || o.deliveredAt || o.placedAt || '');
+        const diff = Math.floor((now.getTime() - od.getTime()) / (1000 * 60 * 60 * 24));
+        if (diff < 0 || diff > 29) return;
+        const week = Math.floor(diff / 7);
+        data[3 - week] += 1;
+      });
+    }
+    console.log('[OrderVolume] X Axis Labels:', labels);
+    console.log('[OrderVolume] Raw Data:', data);
+    return {
+      labels,
+      datasets: [
+        {
+          data,
+          color: (opacity = 1) => `rgba(255, 205, 45, ${opacity})`,
+        },
+      ],
+    };
+  }
+
+  
 
   const renderMetricCard = (
     icon: React.ReactNode,
@@ -104,9 +302,11 @@ export default function AnalyticsScreen() {
     <Card style={styles.metricCard}>
       <View style={styles.metricHeader}>
         <View style={styles.metricIcon}>{icon}</View>
-        <View style={[styles.changeIndicator, { backgroundColor: isPositive ? theme.colors.success : theme.colors.error }]}>
-          <Text style={styles.changeText}>{change}</Text>
-        </View>
+        {change ? (
+          <View style={[styles.changeIndicator, { backgroundColor: isPositive ? theme.colors.success : theme.colors.error }]}> 
+            <Text style={styles.changeText}>{change}</Text>
+          </View>
+        ) : null}
       </View>
       <Text style={styles.metricValue}>{value}</Text>
       <Text style={styles.metricTitle}>{title}</Text>
@@ -133,6 +333,35 @@ export default function AnalyticsScreen() {
     </TouchableOpacity>
   );
 
+  // Helper for order volume chart segments and Y labels
+  function getOrderVolumeSegments(data: number[]): number {
+    const max = Math.max(...data, 0);
+    // Define minimum interval to avoid binary feeling when max is low
+    const minInterval = 6;
+    // Calculate top value for y-axis as max + interval
+    const interval = Math.ceil(max / 6) || 1;
+    const adjustedInterval = interval < minInterval ? minInterval : interval;
+    const topValue = max + adjustedInterval;
+    // Calculate step for y-axis labels (6 segments)
+    const step = Math.ceil(topValue / 6) || 1;
+    const yLabels = [];
+    for (let i = 0; i <= topValue; i += step) {
+      yLabels.push(i);
+    }
+    console.log('[OrderVolume] Y Axis Labels (ticks):', yLabels);
+    return topValue;
+  }
+  function padOrderVolumeData(data: number[]): number[] {
+    // Pad data to length 7 for 7days, or 4 for weeks, so chart is not squished
+    if (data.length === 7) {
+      while (data.length < 7) data.push(0);
+    } else if (data.length === 4) {
+      while (data.length < 4) data.push(0);
+    }
+    console.log('[OrderVolume] Padded Data:', data);
+    return data;
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -148,113 +377,131 @@ export default function AnalyticsScreen() {
           {timeFilters.map(renderFilterButton)}
         </View>
 
-        {/* Key Metrics */}
-        <View style={styles.metricsContainer}>
-          {renderMetricCard(
-            <DollarSign size={24} color={theme.colors.primary} />,
-            'Total Revenue',
-            '₹12,450',
-            '+12%',
-            true
-          )}
-          {renderMetricCard(
-            <Package size={24} color={theme.colors.secondary} />,
-            'Total Orders',
-            '147',
-            '+8%',
-            true
-          )}
-          {renderMetricCard(
-            <TrendingUp size={24} color={theme.colors.success} />,
-            'Avg Order Value',
-            '₹285',
-            '+15%',
-            true
-          )}
-          {renderMetricCard(
-            <Clock size={24} color={theme.colors.warning} />,
-            'Avg Processing Time',
-            '18 hrs',
-            '-5%',
-            false
-          )}
-        </View>
-
-        {/* Revenue Trend */}
-        <Card style={styles.chartCard}>
-          <Text style={styles.chartTitle}>Revenue Trend</Text>
-          <LineChart
-            data={revenueData}
-            width={screenWidth - 64}
-            height={220}
-            chartConfig={chartConfig}
-            bezier
-            style={styles.chart}
-            withInnerLines={false}
-            withOuterLines={false}
-            withVerticalLabels={true}
-            withHorizontalLabels={true}
-          />
-        </Card>
-
-        {/* Order Volume */}
-        <Card style={styles.chartCard}>
-          <Text style={styles.chartTitle}>Weekly Order Volume</Text>
-          <BarChart
-            data={orderVolumeData}
-            width={screenWidth - 64}
-            height={220}
-            chartConfig={chartConfig}
-            style={styles.chart}
-            withInnerLines={false}
-            showValuesOnTopOfBars={true}
-            yAxisLabel=""
-            yAxisSuffix=""
-          />
-        </Card>
-
-        {/* Service Breakdown */}
-        <Card style={styles.chartCard}>
-          <Text style={styles.chartTitle}>Revenue by Service</Text>
-          <PieChart
-            data={serviceBreakdownData}
-            width={screenWidth - 64}
-            height={220}
-            chartConfig={chartConfig}
-            accessor="population"
-            backgroundColor="transparent"
-            paddingLeft="15"
-            style={styles.chart}
-          />
-        </Card>
-
-        {/* Performance Metrics */}
-        <Card style={styles.performanceCard}>
-          <Text style={styles.chartTitle}>Performance Metrics</Text>
-          <View style={styles.performanceMetrics}>
-            <View style={styles.performanceRow}>
-              <Text style={styles.performanceLabel}>Order Approval Rate</Text>
-              <View style={styles.performanceBar}>
-                <View style={[styles.performanceProgress, { width: '95%', backgroundColor: theme.colors.success }]} />
-              </View>
-              <Text style={styles.performanceValue}>95%</Text>
+        {loading ? (
+          <ActivityIndicator size="large" color={theme.colors.primary} style={{ marginTop: 40 }} />
+        ) : (
+          <>
+            {/* Key Metrics */}
+            <View style={styles.metricsContainer}>
+              {renderMetricCard(
+                <IndianRupee size={24} color={theme.colors.primary} />, // Total Revenue
+                'Total Revenue',
+                `₹${metrics.totalRevenue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                '',
+                true
+              )}
+              {renderMetricCard(
+                <Package size={24} color={theme.colors.secondary} />, // Total Orders
+                'Total Orders',
+                `${metrics.totalOrders}`,
+                '',
+                true
+              )}
+              {renderMetricCard(
+                <TrendingUp size={24} color={theme.colors.success} />, // Avg Order Value
+                'Avg Order Value',
+                `₹${metrics.avgOrderValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                '',
+                true
+              )}
             </View>
-            <View style={styles.performanceRow}>
-              <Text style={styles.performanceLabel}>On-Time Delivery</Text>
-              <View style={styles.performanceBar}>
-                <View style={[styles.performanceProgress, { width: '88%', backgroundColor: theme.colors.secondary }]} />
+
+            {/* Revenue Trend */}
+            <Card style={styles.chartCard}>
+              <Text style={styles.chartTitle}>Revenue Trend</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', position: 'relative' }}>
+                {/* Rotated Y-axis label with even less space and higher zIndex */}
+                <View style={{ width: 10, alignItems: 'center', justifyContent: 'center', height: 260, marginRight: -10, position: 'absolute', left: 0, top: 0, zIndex: 2 }}>
+                  <Text style={{ color: theme.colors.textSecondary, fontSize: 12, transform: [{ rotate: '-90deg' }], textAlign: 'center', width: 80, backgroundColor: 'transparent' }}>Revenue (₹)</Text>
+                </View>
+                <View style={{ flex: 1, marginLeft: 10, zIndex: 1 }}>
+                  <LineChart
+                    data={metrics.revenueData}
+                    width={screenWidth - 100}
+                    height={260}
+                    chartConfig={{
+                      ...chartConfig,
+                      propsForBackgroundLines: {
+                        strokeDasharray: '4',
+                        stroke: theme.colors.textSecondary + '22',
+                        strokeWidth: 1,
+                      },
+                    }}
+                    bezier
+                    style={{ ...styles.chart, marginRight: 0, marginLeft: 0 }}
+                    withInnerLines={true}
+                    withOuterLines={true}
+                    withVerticalLabels={true}
+                    withHorizontalLabels={true}
+                    yAxisLabel=""
+                    fromZero={true}
+                  />
+                </View>
               </View>
-              <Text style={styles.performanceValue}>88%</Text>
-            </View>
-            <View style={styles.performanceRow}>
-              <Text style={styles.performanceLabel}>Customer Satisfaction</Text>
-              <View style={styles.performanceBar}>
-                <View style={[styles.performanceProgress, { width: '92%', backgroundColor: theme.colors.primary }]} />
+              <Text style={{ textAlign: 'center', color: theme.colors.textSecondary, fontSize: 12, marginTop: 4 }}>Day</Text>
+            </Card>
+
+            {/* Weekly Order Volume - updated to match Revenue Trend UI */}
+            <Card style={styles.chartCard}>
+              <Text style={styles.chartTitle}>Weekly Order Volume</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', position: 'relative' }}>
+                {/* Rotated Y-axis label with even less space and higher zIndex */}
+                <View style={{ width: 10, alignItems: 'center', justifyContent: 'center', height: 260, marginRight: -10, position: 'absolute', left: 0, top: 0, zIndex: 2 }}>
+                  <Text style={{ color: theme.colors.textSecondary, fontSize: 12, transform: [{ rotate: '-90deg' }], textAlign: 'center', width: 60, backgroundColor: 'transparent' }}>Orders</Text>
+                </View>
+                <View style={{ flex: 1, marginLeft: 10, zIndex: 1 }}>
+                  <BarChart
+                    data={{
+                      ...metrics.orderVolumeData,
+                      datasets: [
+                        {
+                          ...metrics.orderVolumeData.datasets[0],
+                          data: padOrderVolumeData(metrics.orderVolumeData.datasets[0].data),
+                        },
+                      ],
+                    }}
+                    width={screenWidth - 100}
+                    height={260}
+                    chartConfig={{
+                      ...chartConfig,
+                      propsForBackgroundLines: {
+                        strokeDasharray: '4',
+                        stroke: theme.colors.textSecondary + '22',
+                        strokeWidth: 1,
+                      },
+                    }}
+                    style={{ ...styles.chart, marginRight: 0, marginLeft: 0 }}
+                    withInnerLines={true}
+                    withVerticalLabels={true}
+                    withHorizontalLabels={true}
+                    yAxisLabel=""
+                    yAxisSuffix=""
+                    fromZero={true}
+                    showValuesOnTopOfBars={true}
+                    segments={getOrderVolumeSegments(metrics.orderVolumeData.datasets[0].data)}
+                    yAxisInterval={Math.ceil((Math.max(...metrics.orderVolumeData.datasets[0].data) + 6) / 6) || 1}
+                  />
+                </View>
               </View>
-              <Text style={styles.performanceValue}>4.6/5</Text>
-            </View>
-          </View>
-        </Card>
+              <Text style={{ textAlign: 'center', color: theme.colors.textSecondary, fontSize: 12, marginTop: 4 }}>{selectedFilter === '7days' || selectedFilter === 'today' ? 'Day' : 'Week'}</Text>
+            </Card>
+
+            {/* Service Breakdown (static for now) */}
+            <Card style={styles.chartCard}>
+              <Text style={styles.chartTitle}>Revenue by Service</Text>
+              <PieChart
+                data={serviceBreakdownData}
+                width={screenWidth - 64}
+                height={220}
+                chartConfig={chartConfig}
+                accessor="population"
+                backgroundColor="transparent"
+                paddingLeft="15"
+                style={styles.chart}
+              />
+            </Card>
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -362,41 +609,5 @@ const styles = StyleSheet.create({
   },
   chart: {
     borderRadius: theme.borderRadius.md,
-  },
-  performanceCard: {
-    margin: theme.spacing.lg,
-    padding: theme.spacing.lg,
-    marginBottom: theme.spacing.xxl,
-  },
-  performanceMetrics: {
-    gap: theme.spacing.lg,
-  },
-  performanceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.md,
-  },
-  performanceLabel: {
-    ...theme.typography.bodySmall,
-    color: theme.colors.textPrimary,
-    flex: 1,
-  },
-  performanceBar: {
-    flex: 2,
-    height: 8,
-    backgroundColor: theme.colors.surface,
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  performanceProgress: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  performanceValue: {
-    ...theme.typography.bodySmall,
-    color: theme.colors.textPrimary,
-    fontWeight: '600',
-    minWidth: 50,
-    textAlign: 'right',
   },
 });

@@ -7,14 +7,22 @@ import Button from './Button';
 
 export interface Order {
   id: string;
+  customerId: string;
   customerName: string;
   phoneNumber: string;
   pickupAddress: string;
   pickupDate: string;
   pickupTime: string;
   itemCount: string;
-  status: 'pending' | 'processing' | 'dispatched' | 'delivered' | 'rejected';
+  status: 'pending' | 'confirmed' | 'pickup_scheduled' | 'picked_up' | 'in_process' | 'ready_for_delivery' | 'out_for_delivery' | 'delivered' | 'rejected' | 'failed';
+  paymentType?: 'COD' | 'ONLINE';
+  paymentStatus?: 'pending' | 'paid' | 'failed' | 'refunded';
   totalAmount?: number;
+  gst?: number;
+  deliveryFee?: number;
+  deliveryPartnerId?: string;
+  deliveryPartnerName?: string;
+  distance?: number;
 }
 
 interface OrderCardProps {
@@ -40,13 +48,23 @@ export default function OrderCard({
     switch (status) {
       case 'pending':
         return theme.colors.warning;
-      case 'processing':
+      case 'confirmed':
         return theme.colors.warning;
-      case 'dispatched':
+      case 'pickup_scheduled':
+        return theme.colors.warning;
+      case 'picked_up':
+        return theme.colors.warning;
+      case 'in_process':
+        return theme.colors.warning;
+      case 'ready_for_delivery':
+        return theme.colors.secondary;
+      case 'out_for_delivery':
         return theme.colors.secondary;
       case 'delivered':
         return theme.colors.success;
       case 'rejected':
+        return theme.colors.error;
+      case 'failed':
         return theme.colors.error;
       default:
         return theme.colors.textSecondary;
@@ -57,14 +75,24 @@ export default function OrderCard({
     switch (status) {
       case 'pending':
         return 'Pending Approval';
-      case 'processing':
-        return 'In Progress';
-      case 'dispatched':
+      case 'confirmed':
+        return 'Confirmed';
+      case 'pickup_scheduled':
+        return 'Pickup Scheduled';
+      case 'picked_up':
+        return 'Picked Up';
+      case 'in_process':
+        return 'In Process';
+      case 'ready_for_delivery':
+        return 'Ready for Delivery';
+      case 'out_for_delivery':
         return 'Out for Delivery';
       case 'delivered':
         return 'Delivered';
       case 'rejected':
         return 'Rejected';
+      case 'failed':
+        return 'Failed';
       default:
         return status;
     }
@@ -91,17 +119,57 @@ export default function OrderCard({
             />
           </View>
         );
-      case 'processing':
+      case 'confirmed':
+        return (
+          <Button
+            title="Schedule Pickup"
+            onPress={() => onApprove?.(order.id)}
+            variant="primary"
+            size="small"
+            style={styles.actionButton}
+          />
+        );
+      case 'pickup_scheduled':
+        return (
+          <Button
+            title="Mark as Picked Up"
+            onPress={() => onApprove?.(order.id)}
+            variant="primary"
+            size="small"
+            style={styles.actionButton}
+          />
+        );
+      case 'picked_up':
+        return (
+          <Button
+            title="Start Processing"
+            onPress={() => onApprove?.(order.id)}
+            variant="primary"
+            size="small"
+            style={styles.actionButton}
+          />
+        );
+      case 'in_process':
         return (
         <Button
-          title="Mark as Ready for Dispatch"
+          title="Mark as Ready for Delivery"
           onPress={() => onMarkReady?.(order.id)}
           variant="primary"
           size="small"
           style={isDashboard ? styles.dashboardButton : undefined}
         />
         );
-      case 'dispatched':
+      case 'ready_for_delivery':
+        return (
+        <Button
+          title="Dispatch for Delivery"
+          onPress={() => onMarkReady?.(order.id)}
+          variant="primary"
+          size="small"
+          style={isDashboard ? styles.dashboardButton : undefined}
+        />
+        );
+      case 'out_for_delivery':
         return (
         <Button
           title="Mark as Delivered"
