@@ -7,8 +7,11 @@ import {
   TouchableOpacity,
   Alert,
   SafeAreaView,
+  TextInput,
+  Dimensions,
+  Animated,
 } from 'react-native';
-import { Plus } from 'lucide-react-native';
+import { Plus, Search, Filter } from 'lucide-react-native';
 import { theme } from '@/constants/theme';
 import ServiceCard from '@/components/ServiceCard';
 import ServiceFormModal from '@/components/ServiceFormModal';
@@ -63,6 +66,12 @@ export default function ServicesScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingService, setEditingService] = useState<Service | null>(null);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedFilter, setSelectedFilter] = useState<'all' | 'available' | 'unavailable'>('all');
+  const screenWidth = Dimensions.get('window').width;
+  const scrollY = new Animated.Value(0);
+  const [showFloatingSearch, setShowFloatingSearch] = useState(false);
+  
   const [formData, setFormData] = useState<{
     name: string;
     description: string;
@@ -80,7 +89,6 @@ export default function ServicesScreen() {
     state: '',
     area: '',
   });
-  const [searchQuery, setSearchQuery] = useState('');
 
   const resetForm = () => {
     setFormData({
@@ -214,6 +222,62 @@ export default function ServicesScreen() {
     return `₹${service.price}`;
   };
 
+  // Filter and search services
+  const getFilteredServices = () => {
+    let filtered = services;
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      filtered = filtered.filter(service =>
+        service.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        service.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (service.apparelTypes && service.apparelTypes.toLowerCase().includes(searchQuery.toLowerCase()))
+      );
+    }
+
+    // Apply availability filter
+    if (selectedFilter !== 'all') {
+      filtered = filtered.filter(service =>
+        selectedFilter === 'available' ? service.isAvailable : !service.isAvailable
+      );
+    }
+
+    return filtered;
+  };
+
+  const renderFilterButton = (filter: 'all' | 'available' | 'unavailable', title: string) => {
+    const isActive = selectedFilter === filter;
+    let count = 0;
+    
+    if (filter === 'all') count = services.length;
+    else if (filter === 'available') count = services.filter(s => s.isAvailable).length;
+    else count = services.filter(s => !s.isAvailable).length;
+
+    return (
+      <TouchableOpacity
+        style={[
+          styles.filterButton,
+          isActive && styles.activeFilterButton,
+          { minWidth: screenWidth * 0.28 }
+        ]}
+        onPress={() => setSelectedFilter(filter)}
+      >
+        <Text style={[
+          styles.filterText,
+          isActive && styles.activeFilterText,
+          { fontSize: screenWidth < 350 ? 12 : 14 }
+        ]}>
+          {title}
+        </Text>
+        {count > 0 && (
+          <View style={styles.filterBadge}>
+            <Text style={styles.filterBadgeText}>{count}</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
   const renderServiceCard = ({ item }: { item: Service }) => (
     <ServiceCard
       service={item}
@@ -225,19 +289,91 @@ export default function ServicesScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Enhanced Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Services Management</Text>
+        <View style={styles.headerContent}>
+          <Text style={styles.title}>Services</Text>
+          <Text style={styles.subtitle}>Manage your laundry services</Text>
+        </View>
         <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
           <Plus size={24} color={theme.colors.white} />
         </TouchableOpacity>
       </View>
 
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchWrapper}>
+          <Search size={20} color={theme.colors.textSecondary} style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search services, descriptions, apparel types..."
+            placeholderTextColor={theme.colors.textSecondary}
+            onChangeText={setSearchQuery}
+            value={searchQuery}
+          />
+        </View>
+      </View>
+
+      {/* Floating Search Bar */}
+      {showFloatingSearch && (
+        <Animated.View 
+          style={[
+            styles.floatingSearchContainer,
+            {
+              transform: [{ translateY: scrollY.interpolate({
+                inputRange: [0, 100],
+                outputRange: [-100, 0],
+                extrapolate: 'clamp',
+              })}],
+            }
+          ]}
+        >
+          <View style={styles.floatingSearchWrapper}>
+            <Search size={18} color={theme.colors.textSecondary} style={styles.searchIcon} />
+            <TextInput
+              style={styles.floatingSearchInput}
+              placeholder="Search services..."
+              placeholderTextColor={theme.colors.textSecondary}
+              onChangeText={setSearchQuery}
+              value={searchQuery}
+            />
+          </View>
+        </Animated.View>
+      )}
+
+      {/* Filter Tabs */}
+      <View style={styles.filterContainer}>
+        {renderFilterButton('all', 'All')}
+        {renderFilterButton('available', 'Available')}
+        {renderFilterButton('unavailable', 'Unavailable')}
+      </View>
+
       <FlatList
-        data={services}
+        data={getFilteredServices()}
         keyExtractor={(item) => item.id}
         renderItem={renderServiceCard}
         contentContainerStyle={styles.listContainer}
         showsVerticalScrollIndicator={false}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+          { 
+            useNativeDriver: true,
+            listener: (event: any) => {
+              const offsetY = event.nativeEvent.contentOffset.y;
+              setShowFloatingSearch(offsetY > 100);
+            }
+          }
+        )}
+        scrollEventThrottle={16}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Filter size={48} color={theme.colors.textSecondary} />
+            <Text style={styles.emptyText}>No services found</Text>
+            <Text style={styles.emptySubtext}>
+              {searchQuery ? 'Try adjusting your search terms' : 'Add your first service to get started'}
+            </Text>
+          </View>
+        }
       />
 
       <ServiceFormModal
@@ -261,13 +397,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: theme.spacing.lg,
     backgroundColor: theme.colors.white,
+    paddingTop: theme.spacing.lg,
+    paddingBottom: theme.spacing.md,
+    paddingHorizontal: theme.spacing.lg,
     ...theme.shadows.sm,
+  },
+  headerContent: {
+    flex: 1,
+    marginRight: theme.spacing.md,
   },
   title: {
     ...theme.typography.h2,
     color: theme.colors.textPrimary,
+    fontWeight: '700',
+    marginBottom: theme.spacing.xs,
+  },
+  subtitle: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textSecondary,
   },
   addButton: {
     width: 48,
@@ -278,7 +426,126 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...theme.shadows.md,
   },
+  searchContainer: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    backgroundColor: theme.colors.white,
+  },
+  searchWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.borderRadius.lg,
+    paddingHorizontal: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  searchIcon: {
+    marginRight: theme.spacing.sm,
+  },
+  searchInput: {
+    flex: 1,
+    ...theme.typography.body,
+    color: theme.colors.textPrimary,
+    paddingVertical: theme.spacing.md,
+    paddingRight: theme.spacing.sm,
+  },
+  filterContainer: {
+    flexDirection: 'row',
+    backgroundColor: theme.colors.white,
+    paddingHorizontal: theme.spacing.lg,
+    paddingBottom: theme.spacing.md,
+    gap: theme.spacing.xs,
+  },
+  filterButton: {
+    flex: 1,
+    flexDirection: 'row',
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.sm,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing.xs,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  activeFilterButton: {
+    backgroundColor: theme.colors.primary,
+    borderColor: theme.colors.primary,
+    ...theme.shadows.sm,
+  },
+  filterText: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textSecondary,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  activeFilterText: {
+    color: theme.colors.white,
+  },
+  filterBadge: {
+    backgroundColor: theme.colors.secondary,
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterBadgeText: {
+    ...theme.typography.caption,
+    color: theme.colors.primary,
+    fontWeight: '700',
+    fontSize: 10,
+  },
   listContainer: {
     paddingVertical: theme.spacing.md,
+  },
+  floatingSearchContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: theme.colors.white,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    zIndex: 1000,
+    ...theme.shadows.md,
+  },
+  floatingSearchWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.borderRadius.lg,
+    paddingHorizontal: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  floatingSearchInput: {
+    flex: 1,
+    ...theme.typography.body,
+    color: theme.colors.textPrimary,
+    paddingVertical: theme.spacing.sm,
+    paddingRight: theme.spacing.sm,
+  },
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: theme.spacing.xxl,
+    paddingHorizontal: theme.spacing.lg,
+  },
+  emptyText: {
+    ...theme.typography.h3,
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.md,
+    textAlign: 'center',
+  },
+  emptySubtext: {
+    ...theme.typography.body,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    marginTop: theme.spacing.sm,
+    lineHeight: 22,
   },
 });

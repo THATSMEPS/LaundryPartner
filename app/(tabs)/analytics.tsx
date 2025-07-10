@@ -8,7 +8,10 @@ import {
   Dimensions,
   SafeAreaView,
   ActivityIndicator,
+  Modal,
+  Platform,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { LineChart, BarChart, PieChart } from 'react-native-chart-kit';
 import { CalendarDays, TrendingUp, DollarSign, Package, IndianRupee } from 'lucide-react-native';
 import { theme } from '@/constants/theme';
@@ -113,13 +116,19 @@ const timeFilters = [
   { key: 'today', label: 'Today' },
   { key: '7days', label: '7 Days' },
   { key: '30days', label: 'This Month' },
-  // { key: 'month', label: 'This Month' },
+  { key: 'custom', label: 'Custom Range' },
 ];
 
 export default function AnalyticsScreen() {
   const [selectedFilter, setSelectedFilter] = useState<string>('7days');
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [datePickerMode, setDatePickerMode] = useState<'start' | 'end'>('start');
+  const [customDateRange, setCustomDateRange] = useState({
+    startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), // 7 days ago
+    endDate: new Date(), // today
+  });
   const [metrics, setMetrics] = useState<{
     totalRevenue: number;
     totalOrders: number;
@@ -136,7 +145,7 @@ export default function AnalyticsScreen() {
 
   useEffect(() => {
     fetchOrders();
-  }, [selectedFilter]);
+  }, [selectedFilter, customDateRange]);
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -188,8 +197,8 @@ export default function AnalyticsScreen() {
           return date >= addDays(now, -6);
         case '30days':
           return date >= addDays(now, -29);
-        case 'month':
-          return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+        case 'custom':
+          return date >= customDateRange.startDate && date <= customDateRange.endDate;
         default:
           return true;
       }
@@ -362,12 +371,51 @@ export default function AnalyticsScreen() {
     return data;
   }
 
+  const handleDatePickerOpen = () => {
+    setSelectedFilter('custom');
+    setDatePickerMode('start');
+    setShowDatePicker(true);
+  };
+
+  const handleDateChange = (event: any, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false);
+    }
+    
+    if (selectedDate) {
+      if (datePickerMode === 'start') {
+        setCustomDateRange(prev => ({ ...prev, startDate: selectedDate }));
+        if (Platform.OS === 'ios') {
+          setDatePickerMode('end');
+        } else {
+          // On Android, show end date picker after start date is selected
+          setTimeout(() => {
+            setDatePickerMode('end');
+            setShowDatePicker(true);
+          }, 100);
+        }
+      } else {
+        setCustomDateRange(prev => ({ ...prev, endDate: selectedDate }));
+        setShowDatePicker(false);
+      }
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
+      {/* Enhanced Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Business Analytics</Text>
-        <TouchableOpacity style={styles.dateButton}>
+        <View style={styles.headerContent}>
+          <Text style={styles.title}>Analytics</Text>
+          <Text style={styles.subtitle}>Track your business performance</Text>
+        </View>
+        <TouchableOpacity style={styles.dateButton} onPress={handleDatePickerOpen}>
           <CalendarDays size={20} color={theme.colors.primary} />
+          {selectedFilter === 'custom' && (
+            <Text style={styles.dateRangeText}>
+              {customDateRange.startDate.toLocaleDateString()} - {customDateRange.endDate.toLocaleDateString()}
+            </Text>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -503,6 +551,56 @@ export default function AnalyticsScreen() {
           </>
         )}
       </ScrollView>
+
+      {/* Date Picker Modal */}
+      {showDatePicker && (
+        <Modal
+          transparent={true}
+          animationType="slide"
+          visible={showDatePicker}
+          onRequestClose={() => setShowDatePicker(false)}
+        >
+          <View style={styles.datePickerModal}>
+            <View style={styles.datePickerContainer}>
+              <Text style={styles.datePickerTitle}>
+                Select {datePickerMode === 'start' ? 'Start' : 'End'} Date
+              </Text>
+              <DateTimePicker
+                value={datePickerMode === 'start' ? customDateRange.startDate : customDateRange.endDate}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={handleDateChange}
+                maximumDate={new Date()}
+                minimumDate={new Date(Date.now() - 365 * 24 * 60 * 60 * 1000)} // 1 year ago
+              />
+              {Platform.OS === 'ios' && (
+                <View style={styles.datePickerButtons}>
+                  <TouchableOpacity
+                    style={[styles.datePickerButton, styles.cancelButton]}
+                    onPress={() => setShowDatePicker(false)}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.datePickerButton, styles.confirmButton]}
+                    onPress={() => {
+                      if (datePickerMode === 'start') {
+                        setDatePickerMode('end');
+                      } else {
+                        setShowDatePicker(false);
+                      }
+                    }}
+                  >
+                    <Text style={styles.confirmButtonText}>
+                      {datePickerMode === 'start' ? 'Next' : 'Done'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          </View>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }
@@ -516,18 +614,38 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: theme.spacing.lg,
     backgroundColor: theme.colors.white,
+    paddingTop: theme.spacing.lg,
+    paddingBottom: theme.spacing.md,
+    paddingHorizontal: theme.spacing.lg,
     ...theme.shadows.sm,
+  },
+  headerContent: {
+    flex: 1,
+    marginRight: theme.spacing.md,
   },
   title: {
     ...theme.typography.h2,
     color: theme.colors.textPrimary,
+    fontWeight: '700',
+    marginBottom: theme.spacing.xs,
+  },
+  subtitle: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textSecondary,
   },
   dateButton: {
     padding: theme.spacing.sm,
     borderRadius: theme.borderRadius.sm,
     backgroundColor: theme.colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+  },
+  dateRangeText: {
+    ...theme.typography.caption,
+    color: theme.colors.primary,
+    fontWeight: '600',
   },
   content: {
     flex: 1,
@@ -609,5 +727,54 @@ const styles = StyleSheet.create({
   },
   chart: {
     borderRadius: theme.borderRadius.md,
+  },
+  datePickerModal: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  datePickerContainer: {
+    backgroundColor: theme.colors.white,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing.lg,
+    margin: theme.spacing.lg,
+    minWidth: screenWidth * 0.8,
+  },
+  datePickerTitle: {
+    ...theme.typography.h3,
+    color: theme.colors.textPrimary,
+    textAlign: 'center',
+    marginBottom: theme.spacing.lg,
+  },
+  datePickerButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: theme.spacing.lg,
+    gap: theme.spacing.md,
+  },
+  datePickerButton: {
+    flex: 1,
+    paddingVertical: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+    alignItems: 'center',
+  },
+  cancelButton: {
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  confirmButton: {
+    backgroundColor: theme.colors.primary,
+  },
+  cancelButtonText: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textSecondary,
+    fontWeight: '600',
+  },
+  confirmButtonText: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.white,
+    fontWeight: '600',
   },
 });

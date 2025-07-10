@@ -9,12 +9,13 @@ import {
   Alert,
   SafeAreaView,
   TextInput,
+  Dimensions,
+  Animated,
 } from 'react-native';
-import { Bell, RefreshCw } from 'lucide-react-native';
+import { RefreshCw, Search, Star, TrendingUp, Power } from 'lucide-react-native';
 import { theme } from '@/constants/theme';
 import OrderCard, { Order } from '@/components/OrderCard';
-import { getPartnerOrders, updateOrderStatus } from '@/utils/api';
-// import { getPartnerOrders, updateOrderStatus } from '@/utils/api';
+import { getPartnerOrders, updateOrderStatus, updatePartnerStatus } from '@/utils/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 
@@ -26,6 +27,13 @@ export default function DashboardScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [partnerName, setPartnerName] = useState('Partner');
+  const [isOnline, setIsOnline] = useState(true);
+  const scrollY = new Animated.Value(0);
+  const [showFloatingSearch, setShowFloatingSearch] = useState(false);
+  
+  // Get screen width for responsive design
+  const screenWidth = Dimensions.get('window').width;
 
   useEffect(() => {
     checkAuth();
@@ -37,6 +45,16 @@ export default function DashboardScreen() {
       setIsAuthenticated(false);
     } else {
       setIsAuthenticated(true);
+      // Get partner name from storage
+      const partner = await AsyncStorage.getItem('partner');
+      if (partner) {
+        try {
+          const partnerData = JSON.parse(partner);
+          setPartnerName(partnerData.name || 'Partner');
+        } catch (e) {
+          setPartnerName('Partner');
+        }
+      }
       fetchOrders();
     }
   };
@@ -117,6 +135,20 @@ export default function DashboardScreen() {
     ]);
   };
 
+  const togglePartnerStatus = async () => {
+    try {
+      const newStatus = !isOnline;
+      await updatePartnerStatus({ isOnline: newStatus });
+      setIsOnline(newStatus);
+      Alert.alert(
+        'Status Updated',
+        `You are now ${newStatus ? 'online' : 'offline'}`
+      );
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to update status');
+    }
+  };
+
   const getTabCount = (status: string) => {
     return orders.filter(order => order.status === status).length;
   };
@@ -124,21 +156,38 @@ export default function DashboardScreen() {
   const renderTabButton = (
     tab: 'pending' | 'in_process' | 'out_for_delivery',
     title: string
-  ) => (
-    <TouchableOpacity
-      style={[styles.tabButton, activeTab === tab && styles.activeTab]}
-      onPress={() => setActiveTab(tab)}
-    >
-      <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>
-        {title}
-      </Text>
-      {getTabCount(tab) > 0 && (
-        <View style={styles.tabBadge}>
-          <Text style={styles.tabBadgeText}>{getTabCount(tab)}</Text>
-        </View>
-      )}
-    </TouchableOpacity>
-  );
+  ) => {
+    const count = getTabCount(tab);
+    const isActive = activeTab === tab;
+    
+    return (
+      <TouchableOpacity
+        style={[
+          styles.tabButton,
+          isActive && styles.activeTab,
+          { minWidth: screenWidth * 0.28 } // Responsive width
+        ]}
+        onPress={() => setActiveTab(tab)}
+      >
+        <Text 
+          style={[
+            styles.tabText, 
+            isActive && styles.activeTabText,
+            { fontSize: screenWidth < 350 ? 12 : 14 } // Responsive font size
+          ]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+        >
+          {title}
+        </Text>
+        {count > 0 && (
+          <View style={styles.tabBadge}>
+            <Text style={styles.tabBadgeText}>{count}</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  };
 
   if (loading) {
     return (
@@ -167,27 +216,85 @@ export default function DashboardScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Enhanced Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.welcomeText}>Welcome back!</Text>
-          <Text style={styles.businessName}>Clean & Fresh Laundry</Text>
+        <View style={styles.headerContent}>
+          <View style={styles.welcomeSection}>
+            <Text style={styles.welcomeText}>Welcome back! 👋</Text>
+            <Text style={styles.businessName}>{partnerName}</Text>
+            <View style={styles.statsRow}>
+              <View style={styles.statItem}>
+                <TrendingUp size={16} color={theme.colors.success} />
+                <Text style={styles.statText}>Active</Text>
+              </View>
+              <View style={styles.statDot} />
+              <View style={styles.statItem}>
+                <Star size={16} color={theme.colors.secondary} />
+                <Text style={styles.statText}>4.8 Rating</Text>
+              </View>
+            </View>
+          </View>
+          <TouchableOpacity 
+            style={[
+              styles.statusToggleButton,
+              { backgroundColor: isOnline ? theme.colors.success : theme.colors.error }
+            ]}
+            onPress={togglePartnerStatus}
+          >
+            <Power size={20} color={theme.colors.white} />
+            <Text style={styles.statusToggleText}>
+              {isOnline ? 'Online' : 'Offline'}
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
 
+      {/* Enhanced Search Bar */}
       <View style={styles.searchContainer}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search by Order ID or Customer Name"
-          placeholderTextColor={theme.colors.textSecondary}
-          onChangeText={(text) => setSearchQuery(text)}
-          value={searchQuery}
-        />
+        <View style={styles.searchWrapper}>
+          <Search size={20} color={theme.colors.textSecondary} style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search orders..."
+            placeholderTextColor={theme.colors.textSecondary}
+            onChangeText={(text) => setSearchQuery(text)}
+            value={searchQuery}
+          />
+        </View>
       </View>
 
+      {/* Floating Search Bar */}
+      {showFloatingSearch && (
+        <Animated.View 
+          style={[
+            styles.floatingSearchContainer,
+            {
+              transform: [{ translateY: scrollY.interpolate({
+                inputRange: [0, 100],
+                outputRange: [-100, 0],
+                extrapolate: 'clamp',
+              })}],
+            }
+          ]}
+        >
+          <View style={styles.floatingSearchWrapper}>
+            <Search size={18} color={theme.colors.textSecondary} style={styles.searchIcon} />
+            <TextInput
+              style={styles.floatingSearchInput}
+              placeholder="Search orders..."
+              placeholderTextColor={theme.colors.textSecondary}
+              onChangeText={(text) => setSearchQuery(text)}
+              value={searchQuery}
+            />
+          </View>
+        </Animated.View>
+      )}
+
+      {/* Enhanced Tabs */}
       <View style={styles.tabContainer}>
         {renderTabButton('pending', 'Pending')}
         {renderTabButton('in_process', 'Processing')}
-        {renderTabButton('out_for_delivery', 'Out for Delivery')}
+        {renderTabButton('out_for_delivery', 'Delivery')}
       </View>
 
       <FlatList
@@ -204,6 +311,17 @@ export default function DashboardScreen() {
           />
         )}
         contentContainerStyle={styles.listContainer}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+          { 
+            useNativeDriver: true,
+            listener: (event: any) => {
+              const offsetY = event.nativeEvent.contentOffset.y;
+              setShowFloatingSearch(offsetY > 100);
+            }
+          }
+        )}
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -232,54 +350,165 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background,
   },
   header: {
+    backgroundColor: theme.colors.white,
+    paddingTop: theme.spacing.lg,
+    paddingBottom: theme.spacing.md,
+    paddingHorizontal: theme.spacing.lg,
+    ...theme.shadows.sm,
+  },
+  headerContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: theme.spacing.lg,
-    backgroundColor: theme.colors.white,
-    ...theme.shadows.sm,
+    alignItems: 'flex-start',
+  },
+  welcomeSection: {
+    flex: 1,
   },
   welcomeText: {
     ...theme.typography.bodySmall,
     color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.xs,
   },
   businessName: {
-    ...theme.typography.h2,
-    color: theme.colors.textPrimary,
+    ...theme.typography.h3,
+    color: theme.colors.primary,
+    fontWeight: '500',
+    marginBottom: theme.spacing.sm,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: theme.spacing.xs,
+  },
+  statItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+  },
+  statText: {
+    ...theme.typography.caption,
+    color: theme.colors.textSecondary,
+    fontWeight: '600',
+  },
+  statDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: theme.colors.border,
+    marginHorizontal: theme.spacing.sm,
+  },
+  notificationButton: {
+    position: 'relative',
+    padding: theme.spacing.sm,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface,
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: theme.colors.error,
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notificationBadgeText: {
+    ...theme.typography.caption,
+    color: theme.colors.white,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  statusToggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    borderRadius: theme.borderRadius.lg,
+    gap: theme.spacing.xs,
+    ...theme.shadows.sm,
+  },
+  statusToggleText: {
+    ...theme.typography.caption,
+    color: theme.colors.white,
+    fontWeight: '600',
   },
   searchContainer: {
     paddingHorizontal: theme.spacing.lg,
-    paddingVertical: theme.spacing.sm,
+    paddingVertical: theme.spacing.md,
     backgroundColor: theme.colors.white,
   },
+  searchWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.borderRadius.lg,
+    paddingHorizontal: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  searchIcon: {
+    marginRight: theme.spacing.sm,
+  },
   searchInput: {
+    flex: 1,
+    ...theme.typography.body,
+    color: theme.colors.textPrimary,
+    paddingVertical: theme.spacing.md,
+    paddingRight: theme.spacing.sm,
+  },
+  floatingSearchContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: theme.colors.white,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    zIndex: 1000,
+    ...theme.shadows.md,
+  },
+  floatingSearchWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.borderRadius.lg,
+    paddingHorizontal: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  floatingSearchInput: {
+    flex: 1,
     ...theme.typography.body,
     color: theme.colors.textPrimary,
     paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-    borderRadius: theme.borderRadius.md,
-    backgroundColor: theme.colors.surface,
+    paddingRight: theme.spacing.sm,
   },
   tabContainer: {
     flexDirection: 'row',
     backgroundColor: theme.colors.white,
     paddingHorizontal: theme.spacing.lg,
-    paddingVertical: theme.spacing.sm,
-    gap: theme.spacing.sm,
+    paddingBottom: theme.spacing.md,
+    gap: theme.spacing.xs,
   },
   tabButton: {
     flex: 1,
     flexDirection: 'row',
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-    borderRadius: 20,
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.sm,
+    borderRadius: theme.borderRadius.lg,
     backgroundColor: theme.colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: theme.spacing.sm,
+    gap: theme.spacing.xs,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
   activeTab: {
-    backgroundColor: theme.colors.success,
+    backgroundColor: theme.colors.primary,
+    borderColor: theme.colors.primary,
+    ...theme.shadows.sm,
   },
   tabText: {
     ...theme.typography.bodySmall,
@@ -293,15 +522,16 @@ const styles = StyleSheet.create({
   tabBadge: {
     backgroundColor: theme.colors.secondary,
     borderRadius: 10,
-    minWidth: 20,
-    height: 20,
+    minWidth: 18,
+    height: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
   tabBadgeText: {
     ...theme.typography.caption,
     color: theme.colors.primary,
-    fontWeight: '600',
+    fontWeight: '700',
+    fontSize: 10,
   },
   listContainer: {
     paddingVertical: theme.spacing.md,
@@ -311,16 +541,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: theme.spacing.xxl,
+    paddingHorizontal: theme.spacing.lg,
   },
   emptyText: {
     ...theme.typography.h3,
     color: theme.colors.textSecondary,
     marginTop: theme.spacing.md,
+    textAlign: 'center',
   },
   emptySubtext: {
     ...theme.typography.body,
     color: theme.colors.textSecondary,
     textAlign: 'center',
     marginTop: theme.spacing.sm,
+    lineHeight: 22,
   },
 });

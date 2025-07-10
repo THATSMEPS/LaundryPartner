@@ -9,6 +9,7 @@ import {
   Modal,
   SafeAreaView,
   ScrollView,
+  Animated,
 } from 'react-native';
 import { Filter, Download, Eye, X } from 'lucide-react-native';
 import { theme } from '@/constants/theme';
@@ -48,6 +49,8 @@ export default function HistoryScreen() {
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [invoiceModalVisible, setInvoiceModalVisible] = useState(false);
+  const scrollY = new Animated.Value(0);
+  const [showFloatingSearch, setShowFloatingSearch] = useState(false);
   const [invoiceOrder, setInvoiceOrder] = useState<HistoryOrder | null>(null);
   const { profile: partnerProfile, saveProfile } = usePartnerProfile();
 
@@ -277,27 +280,58 @@ export default function HistoryScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header and search/filter on same line, less padding */}
-      <View style={styles.headerRow}>
-        <Text style={styles.title}>Order History</Text>
-        <View style={styles.searchFilterRow}>
-          <View style={styles.searchBarInline}>
+      {/* Enhanced Header */}
+      <View style={styles.header}>
+        <View style={styles.headerContent}>
+          <Text style={styles.title}>Order History</Text>
+          <Text style={styles.subtitle}>View completed and past orders</Text>
+        </View>
+        <TouchableOpacity
+          style={styles.filterIconButton}
+          onPress={() => setFilterModalVisible(true)}
+        >
+          <Filter size={24} color={theme.colors.primary} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Enhanced Search Bar */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchWrapper}>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search orders..."
+            placeholderTextColor={theme.colors.textSecondary}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+        </View>
+      </View>
+
+      {/* Floating Search Bar */}
+      {showFloatingSearch && (
+        <Animated.View 
+          style={[
+            styles.floatingSearchContainer,
+            {
+              transform: [{ translateY: scrollY.interpolate({
+                inputRange: [0, 100],
+                outputRange: [-100, 0],
+                extrapolate: 'clamp',
+              })}],
+            }
+          ]}
+        >
+          <View style={styles.floatingSearchWrapper}>
             <TextInput
-              style={styles.searchInput}
-              placeholder="Search by Order ID, Customer, or Service"
+              style={styles.floatingSearchInput}
+              placeholder="Search orders..."
               placeholderTextColor={theme.colors.textSecondary}
               value={searchQuery}
               onChangeText={setSearchQuery}
             />
           </View>
-          <TouchableOpacity
-            style={styles.filterButton}
-            onPress={() => setFilterModalVisible(true)}
-          >
-            <Filter size={20} color={theme.colors.primary} />
-          </TouchableOpacity>
-        </View>
-      </View>
+        </Animated.View>
+      )}
 
       <FlatList
         data={filteredOrders}
@@ -305,6 +339,17 @@ export default function HistoryScreen() {
         renderItem={renderOrderCard}
         contentContainerStyle={styles.listContainer}
         showsVerticalScrollIndicator={false}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+          { 
+            useNativeDriver: true,
+            listener: (event: any) => {
+              const offsetY = event.nativeEvent.contentOffset.y;
+              setShowFloatingSearch(offsetY > 100);
+            }
+          }
+        )}
+        scrollEventThrottle={16}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>No orders found</Text>
@@ -512,16 +557,55 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background,
   },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: theme.colors.white,
+    paddingTop: theme.spacing.lg,
+    paddingBottom: theme.spacing.md,
+    paddingHorizontal: theme.spacing.lg,
+    ...theme.shadows.sm,
+  },
+  headerContent: {
+    flex: 1,
+    marginRight: theme.spacing.md,
+  },
+  title: {
+    ...theme.typography.h2,
+    color: theme.colors.textPrimary,
+    fontWeight: '700',
+    marginBottom: theme.spacing.xs,
+  },
+  subtitle: {
+    ...theme.typography.bodySmall,
+    color: theme.colors.textSecondary,
+  },
+  filterIconButton: {
+    padding: theme.spacing.sm,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface,
+  },
+  searchContainer: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    backgroundColor: theme.colors.white,
+  },
+  searchWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.borderRadius.lg,
+    paddingHorizontal: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
   headerRow: {
     paddingHorizontal: theme.spacing.lg,
     paddingTop: theme.spacing.lg,
     paddingBottom: theme.spacing.sm, // less padding below heading
     backgroundColor: theme.colors.white,
     flexDirection: 'column',
-  },
-  title: {
-    ...theme.typography.h2,
-    color: theme.colors.textPrimary,
   },
   searchFilterRow: {
     flexDirection: 'row',
@@ -550,10 +634,6 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
     marginLeft: theme.spacing.sm,
   },
-  searchContainer: {
-    padding: theme.spacing.lg,
-    backgroundColor: theme.colors.white,
-  },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -566,6 +646,8 @@ const styles = StyleSheet.create({
     flex: 1,
     ...theme.typography.body,
     color: theme.colors.textPrimary,
+    paddingVertical: theme.spacing.md,
+    paddingRight: theme.spacing.sm,
   },
   listContainer: {
     paddingVertical: theme.spacing.md,
@@ -913,5 +995,29 @@ const styles = StyleSheet.create({
     color: theme.colors.white,
     fontWeight: 'bold',
     fontSize: 14,
+  },
+  floatingSearchContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: theme.colors.white,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    zIndex: 1000,
+    ...theme.shadows.md,
+  },
+  floatingSearchWrapper: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.borderRadius.lg,
+    paddingHorizontal: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  floatingSearchInput: {
+    ...theme.typography.body,
+    color: theme.colors.textPrimary,
+    paddingVertical: theme.spacing.sm,
+    paddingRight: theme.spacing.sm,
   },
 });
