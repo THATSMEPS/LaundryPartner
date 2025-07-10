@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  FlatList,
   RefreshControl,
   TouchableOpacity,
   Alert,
@@ -12,6 +11,7 @@ import {
   Dimensions,
   Animated,
 } from 'react-native';
+import { FlatList as RNFlatList } from 'react-native';
 import { RefreshCw, Search, Star, TrendingUp, Power } from 'lucide-react-native';
 import { theme } from '@/constants/theme';
 import OrderCard, { Order } from '@/components/OrderCard';
@@ -28,7 +28,7 @@ export default function DashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [partnerName, setPartnerName] = useState('Partner');
-  const [isOnline, setIsOnline] = useState(true);
+  const [isOpen, setisOpen] = useState(true);
   const scrollY = new Animated.Value(0);
   const [showFloatingSearch, setShowFloatingSearch] = useState(false);
   
@@ -137,9 +137,9 @@ export default function DashboardScreen() {
 
   const togglePartnerStatus = async () => {
     try {
-      const newStatus = !isOnline;
-      await updatePartnerStatus({ isOnline: newStatus });
-      setIsOnline(newStatus);
+      const newStatus = !isOpen;
+      await updatePartnerStatus({ isOpen: newStatus });
+      setisOpen(newStatus);
       Alert.alert(
         'Status Updated',
         `You are now ${newStatus ? 'online' : 'offline'}`
@@ -237,13 +237,13 @@ export default function DashboardScreen() {
           <TouchableOpacity 
             style={[
               styles.statusToggleButton,
-              { backgroundColor: isOnline ? theme.colors.success : theme.colors.error }
+              { backgroundColor: isOpen ? theme.colors.success : theme.colors.error }
             ]}
             onPress={togglePartnerStatus}
           >
             <Power size={20} color={theme.colors.white} />
             <Text style={styles.statusToggleText}>
-              {isOnline ? 'Online' : 'Offline'}
+              {isOpen ? 'Online' : 'Offline'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -297,7 +297,7 @@ export default function DashboardScreen() {
         {renderTabButton('out_for_delivery', 'Delivery')}
       </View>
 
-      <FlatList
+      <Animated.FlatList
         data={filteredOrders}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
@@ -333,7 +333,11 @@ export default function DashboardScreen() {
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <RefreshCw size={48} color={theme.colors.textSecondary} />
-            <Text style={styles.emptyText}>No {activeTab} orders</Text>
+            <Text style={styles.emptyText}>
+              {activeTab === 'pending' && 'No pending orders'}
+              {activeTab === 'in_process' && 'No orders in process'}
+              {activeTab === 'out_for_delivery' && 'No orders to deliver'}
+            </Text>
             <Text style={styles.emptySubtext}>
               Pull down to refresh and check for new orders
             </Text>

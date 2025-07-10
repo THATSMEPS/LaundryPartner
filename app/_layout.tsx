@@ -7,6 +7,7 @@ import { View, ActivityIndicator } from 'react-native';
 import Toast from 'react-native-toast-message';
 import { theme } from '@/constants/theme';
 import { StyleSheet, Text } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 const toastConfig = {
   info: (props: any) => (
@@ -76,21 +77,27 @@ export default function RootLayout() {
 
   if (checkingAuth) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" />
-      </View>
+      <SafeAreaProvider>
+        <SafeAreaView style={{ flex: 1 }}>
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            <ActivityIndicator size="large" />
+          </View>
+        </SafeAreaView>
+      </SafeAreaProvider>
     );
   }
 
   return (
-    <>
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="login" />
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="+not-found" />
-      </Stack>
-      <StatusBar style="auto" />
-      <Toast config={toastConfig} position="top" topOffset={60} />
-    </>
+    <SafeAreaProvider>
+      <SafeAreaView style={{ flex: 1 }} edges={["top", "bottom"]}>
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="login" />
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="+not-found" />
+        </Stack>
+        <StatusBar style="auto" />
+        <Toast config={toastConfig} position="top" topOffset={60} />
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }

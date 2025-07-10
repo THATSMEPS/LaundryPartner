@@ -8,12 +8,9 @@ import {
   Dimensions,
   SafeAreaView,
   ActivityIndicator,
-  Modal,
-  Platform,
 } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import { LineChart, BarChart, PieChart } from 'react-native-chart-kit';
-import { CalendarDays, TrendingUp, DollarSign, Package, IndianRupee } from 'lucide-react-native';
+import { LineChart, PieChart } from 'react-native-chart-kit';
+import { TrendingUp, DollarSign, Package, IndianRupee } from 'lucide-react-native';
 import { theme } from '@/constants/theme';
 import Card from '@/components/Card';
 import { 
@@ -112,23 +109,9 @@ const serviceBreakdownData = [
   },
 ];
 
-const timeFilters = [
-  { key: 'today', label: 'Today' },
-  { key: '7days', label: '7 Days' },
-  { key: '30days', label: 'This Month' },
-  { key: 'custom', label: 'Custom Range' },
-];
-
 export default function AnalyticsScreen() {
-  const [selectedFilter, setSelectedFilter] = useState<string>('7days');
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [datePickerMode, setDatePickerMode] = useState<'start' | 'end'>('start');
-  const [customDateRange, setCustomDateRange] = useState({
-    startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), // 7 days ago
-    endDate: new Date(), // today
-  });
   const [metrics, setMetrics] = useState<{
     totalRevenue: number;
     totalOrders: number;
@@ -142,164 +125,178 @@ export default function AnalyticsScreen() {
     revenueData: revenueData,
     orderVolumeData: orderVolumeData,
   });
+  const [selectedFilter, setSelectedFilter] = useState<'7days' | 'today' | 'month'>('7days');
 
   useEffect(() => {
     fetchOrders();
-  }, [selectedFilter, customDateRange]);
+  }, []);
+
+  useEffect(() => {
+    if (!loading) {
+      updateMetricsWithFilter();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders, selectedFilter]);
 
   const fetchOrders = async () => {
     setLoading(true);
     try {
       const res = await getPartnerOrders();
       const allOrders = res.data?.orders || res.orders || [];
-      // Only delivered orders
-      const deliveredOrders = allOrders.filter((order: Order) => order.status === 'delivered');
-      // Filter by selectedFilter (date range)
-      const filteredOrders = filterOrdersByTime(deliveredOrders, selectedFilter);
-      // Compute metrics
-      const totalRevenue = filteredOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
-      const totalOrders = filteredOrders.length;
-      const avgOrderValue = totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0;
-      const revenueData = computeRevenueTrend(filteredOrders, selectedFilter);
-      const orderVolumeData = computeOrderVolume(filteredOrders, selectedFilter);
-      setMetrics({
-        totalRevenue,
-        totalOrders,
-        avgOrderValue,
-        revenueData,
-        orderVolumeData,
-      });
-      setOrders(filteredOrders);
+      const deliveredOrders: Order[] = allOrders.filter((order: Order) => order.status === 'delivered');
+      setOrders(deliveredOrders);
     } catch (e) {
-      setMetrics({
-        totalRevenue: 0,
-        totalOrders: 0,
-        avgOrderValue: 0,
-        revenueData: revenueData,
-        orderVolumeData: orderVolumeData,
-      });
       setOrders([]);
     } finally {
       setLoading(false);
     }
   };
 
-  // Helper: filter orders by selected time filter
-  function filterOrdersByTime(orders: Order[], filterKey: string): Order[] {
+  // Helper to filter orders by selectedFilter
+  function filterOrdersByDate(orders: Order[], filter: '7days' | 'today' | 'month') {
     const now = new Date();
-    return orders.filter((order: Order) => {
-      const date = new Date(order.deliveredDate || order.deliveredAt || order.placedAt || '');
-      if (isNaN(date.getTime())) return false;
-      switch (filterKey) {
-        case 'today':
-          return date.toDateString() === now.toDateString();
-        case '7days':
-          return date >= addDays(now, -6);
-        case '30days':
-          return date >= addDays(now, -29);
-        case 'custom':
-          return date >= customDateRange.startDate && date <= customDateRange.endDate;
-        default:
-          return true;
-      }
+    if (filter === 'today') {
+      return orders.filter(order => {
+        const date = new Date(order.deliveredAt || order.deliveredDate || order.placedAt || '');
+        return date.toDateString() === now.toDateString();
+      });
+    } else if (filter === '7days') {
+      const weekAgo = new Date(now);
+      weekAgo.setDate(now.getDate() - 6);
+      return orders.filter(order => {
+        const date = new Date(order.deliveredAt || order.deliveredDate || order.placedAt || '');
+        return date >= weekAgo && date <= now;
+      });
+    } else if (filter === 'month') {
+      return orders.filter(order => {
+        const date = new Date(order.deliveredAt || order.deliveredDate || order.placedAt || '');
+        return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+      });
+    }
+    return orders;
+  }
+
+  // Generate chart data from filtered orders
+  function updateMetricsWithFilter() {
+    const filtered = filterOrdersByDate(orders, selectedFilter);
+    // Revenue Trend (LineChart)
+    let revenueLabels: string[] = [];
+    let revenueDataArr: number[] = [];
+    if (selectedFilter === 'today') {
+      // 24 hours
+      revenueLabels = Array.from({ length: 24 }, (_, i) => `${i}:00`);
+      revenueDataArr = Array(24).fill(0);
+      filtered.forEach(order => {
+        const date = new Date(order.deliveredAt || order.deliveredDate || order.placedAt || '');
+        const hour = date.getHours();
+        revenueDataArr[hour] += order.totalAmount || 0;
+      });
+    } else if (selectedFilter === '7days') {
+      // Last 7 days
+      const days = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - (6 - i));
+        return d;
+      });
+      revenueLabels = days.map(d => d.toLocaleDateString('en-IN', { weekday: 'short' }));
+      revenueDataArr = Array(7).fill(0);
+      filtered.forEach(order => {
+        const date = new Date(order.deliveredAt || order.deliveredDate || order.placedAt || '');
+        for (let i = 0; i < days.length; i++) {
+          if (date.toDateString() === days[i].toDateString()) {
+            revenueDataArr[i] += order.totalAmount || 0;
+            break;
+          }
+        }
+      });
+    } else if (selectedFilter === 'month') {
+      // Weeks in month (up to 5)
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = now.getMonth();
+      const weeks = [0, 1, 2, 3, 4];
+      revenueLabels = weeks.map(w => `Week ${w + 1}`);
+      revenueDataArr = Array(5).fill(0);
+      filtered.forEach(order => {
+        const date = new Date(order.deliveredAt || order.deliveredDate || order.placedAt || '');
+        if (date.getMonth() === month && date.getFullYear() === year) {
+          const weekOfMonth = Math.floor((date.getDate() - 1) / 7);
+          revenueDataArr[weekOfMonth] += order.totalAmount || 0;
+        }
+      });
+    }
+    // Order Volume (BarChart)
+    let orderVolumeLabels: string[] = [];
+    let orderVolumeArr: number[] = [];
+    if (selectedFilter === 'today') {
+      orderVolumeLabels = Array.from({ length: 24 }, (_, i) => `${i}:00`);
+      orderVolumeArr = Array(24).fill(0);
+      filtered.forEach(order => {
+        const date = new Date(order.deliveredAt || order.deliveredDate || order.placedAt || '');
+        const hour = date.getHours();
+        orderVolumeArr[hour] += 1;
+      });
+    } else if (selectedFilter === '7days') {
+      const days = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - (6 - i));
+        return d;
+      });
+      orderVolumeLabels = days.map(d => d.toLocaleDateString('en-IN', { weekday: 'short' }));
+      orderVolumeArr = Array(7).fill(0);
+      filtered.forEach(order => {
+        const date = new Date(order.deliveredAt || order.deliveredDate || order.placedAt || '');
+        for (let i = 0; i < days.length; i++) {
+          if (date.toDateString() === days[i].toDateString()) {
+            orderVolumeArr[i] += 1;
+            break;
+          }
+        }
+      });
+    } else if (selectedFilter === 'month') {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = now.getMonth();
+      const weeks = [0, 1, 2, 3, 4];
+      orderVolumeLabels = weeks.map(w => `Week ${w + 1}`);
+      orderVolumeArr = Array(5).fill(0);
+      filtered.forEach(order => {
+        const date = new Date(order.deliveredAt || order.deliveredDate || order.placedAt || '');
+        if (date.getMonth() === month && date.getFullYear() === year) {
+          const weekOfMonth = Math.floor((date.getDate() - 1) / 7);
+          orderVolumeArr[weekOfMonth] += 1;
+        }
+      });
+    }
+    // Key metrics
+    const totalRevenue = filtered.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+    const totalOrders = filtered.length;
+    const avgOrderValue = totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0;
+    setMetrics({
+      totalRevenue,
+      totalOrders,
+      avgOrderValue,
+      revenueData: {
+        labels: revenueLabels,
+        datasets: [
+          {
+            data: revenueDataArr,
+            color: (opacity = 1) => `rgba(0, 121, 107, ${opacity})`,
+            strokeWidth: 3,
+          },
+        ],
+      },
+      orderVolumeData: {
+        labels: orderVolumeLabels,
+        datasets: [
+          {
+            data: orderVolumeArr,
+            color: (opacity = 1) => `rgba(255, 205, 45, ${opacity})`,
+          },
+        ],
+      },
     });
   }
-
-  // Helper: add days to a date
-  function addDays(date: Date, days: number): Date {
-    const d = new Date(date);
-    d.setDate(d.getDate() + days);
-    return d;
-  }
-
-  // Helper: compute revenue trend (by day for 7days/today, by week for 30days/month)
-  function computeRevenueTrend(orders: Order[], filterKey: string) {
-    let labels: string[] = [];
-    let data: number[] = [];
-    const now = new Date();
-    if (filterKey === 'today') {
-      labels = ['Today'];
-      data = [orders.reduce((sum: number, o: Order) => sum + (o.totalAmount || 0), 0)];
-    } else if (filterKey === '7days') {
-      labels = Array.from({ length: 7 }, (_, i) => {
-        const d = addDays(now, -(6 - i));
-        return d.toLocaleDateString('en-IN', { weekday: 'short' });
-      });
-      data = labels.map((_, i) => {
-        const d = addDays(now, -(6 - i));
-        return orders.filter((o: Order) => {
-          const od = new Date(o.deliveredDate || o.deliveredAt || o.placedAt || '');
-          return od.toDateString() === d.toDateString();
-        }).reduce((sum: number, o: Order) => sum + (o.totalAmount || 0), 0);
-      });
-    } else if (filterKey === '30days' || filterKey === 'month') {
-      labels = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
-      data = [0, 0, 0, 0];
-      orders.forEach((o: Order) => {
-        const od = new Date(o.deliveredDate || o.deliveredAt || o.placedAt || '');
-        const diff = Math.floor((now.getTime() - od.getTime()) / (1000 * 60 * 60 * 24));
-        if (diff < 0 || diff > 29) return;
-        const week = Math.floor(diff / 7);
-        data[3 - week] += o.totalAmount || 0;
-      });
-    }
-    return {
-      labels,
-      datasets: [
-        {
-          data,
-          color: (opacity = 1) => `rgba(0, 121, 107, ${opacity})`,
-          strokeWidth: 3,
-        },
-      ],
-    };
-  }
-
-  // Helper: compute order volume (by week for 30days/month, by day for 7days/today)
-  function computeOrderVolume(orders: Order[], filterKey: string) {
-    let labels: string[] = [];
-    let data: number[] = [];
-    const now = new Date();
-    if (filterKey === 'today') {
-      labels = ['Today'];
-      data = [orders.length];
-    } else if (filterKey === '7days') {
-      labels = Array.from({ length: 7 }, (_, i) => {
-        const d = addDays(now, -(6 - i));
-        return d.toLocaleDateString('en-IN', { weekday: 'short' });
-      });
-      data = labels.map((_, i) => {
-        const d = addDays(now, -(6 - i));
-        return orders.filter((o: Order) => {
-          const od = new Date(o.deliveredDate || o.deliveredAt || o.placedAt || '');
-          return od.toDateString() === d.toDateString();
-        }).length;
-      });
-    } else if (filterKey === '30days' || filterKey === 'month') {
-      labels = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
-      data = [0, 0, 0, 0];
-      orders.forEach((o: Order) => {
-        const od = new Date(o.deliveredDate || o.deliveredAt || o.placedAt || '');
-        const diff = Math.floor((now.getTime() - od.getTime()) / (1000 * 60 * 60 * 24));
-        if (diff < 0 || diff > 29) return;
-        const week = Math.floor(diff / 7);
-        data[3 - week] += 1;
-      });
-    }
-    console.log('[OrderVolume] X Axis Labels:', labels);
-    console.log('[OrderVolume] Raw Data:', data);
-    return {
-      labels,
-      datasets: [
-        {
-          data,
-          color: (opacity = 1) => `rgba(255, 205, 45, ${opacity})`,
-        },
-      ],
-    };
-  }
-
-  
 
   const renderMetricCard = (
     icon: React.ReactNode,
@@ -322,26 +319,6 @@ export default function AnalyticsScreen() {
     </Card>
   );
 
-  const renderFilterButton = (filter: typeof timeFilters[0]) => (
-    <TouchableOpacity
-      key={filter.key}
-      style={[
-        styles.filterButton,
-        selectedFilter === filter.key && styles.activeFilterButton,
-      ]}
-      onPress={() => setSelectedFilter(filter.key)}
-    >
-      <Text
-        style={[
-          styles.filterButtonText,
-          selectedFilter === filter.key && styles.activeFilterButtonText,
-        ]}
-      >
-        {filter.label}
-      </Text>
-    </TouchableOpacity>
-  );
-
   // Helper for order volume chart segments and Y labels
   function getOrderVolumeSegments(data: number[]): number {
     const max = Math.max(...data, 0);
@@ -357,7 +334,7 @@ export default function AnalyticsScreen() {
     for (let i = 0; i <= topValue; i += step) {
       yLabels.push(i);
     }
-    console.log('[OrderVolume] Y Axis Labels (ticks):', yLabels);
+    // console.log('[OrderVolume] Y Axis Labels (ticks):', yLabels);
     return topValue;
   }
   function padOrderVolumeData(data: number[]): number[] {
@@ -367,64 +344,40 @@ export default function AnalyticsScreen() {
     } else if (data.length === 4) {
       while (data.length < 4) data.push(0);
     }
-    console.log('[OrderVolume] Padded Data:', data);
+    // console.log('[OrderVolume] Padded Data:', data);
     return data;
   }
 
-  const handleDatePickerOpen = () => {
-    setSelectedFilter('custom');
-    setDatePickerMode('start');
-    setShowDatePicker(true);
-  };
-
-  const handleDateChange = (event: any, selectedDate?: Date) => {
-    if (Platform.OS === 'android') {
-      setShowDatePicker(false);
-    }
-    
-    if (selectedDate) {
-      if (datePickerMode === 'start') {
-        setCustomDateRange(prev => ({ ...prev, startDate: selectedDate }));
-        if (Platform.OS === 'ios') {
-          setDatePickerMode('end');
-        } else {
-          // On Android, show end date picker after start date is selected
-          setTimeout(() => {
-            setDatePickerMode('end');
-            setShowDatePicker(true);
-          }, 100);
-        }
-      } else {
-        setCustomDateRange(prev => ({ ...prev, endDate: selectedDate }));
-        setShowDatePicker(false);
-      }
-    }
-  };
-
   return (
     <SafeAreaView style={styles.container}>
-      {/* Enhanced Header */}
-      <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <Text style={styles.title}>Analytics</Text>
-          <Text style={styles.subtitle}>Track your business performance</Text>
-        </View>
-        <TouchableOpacity style={styles.dateButton} onPress={handleDatePickerOpen}>
-          <CalendarDays size={20} color={theme.colors.primary} />
-          {selectedFilter === 'custom' && (
-            <Text style={styles.dateRangeText}>
-              {customDateRange.startDate.toLocaleDateString()} - {customDateRange.endDate.toLocaleDateString()}
-            </Text>
-          )}
-        </TouchableOpacity>
-      </View>
-
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Time Filter */}
-        <View style={styles.filterContainer}>
-          {timeFilters.map(renderFilterButton)}
+        {/* Header now scrolls with content */}
+        <View style={styles.header}>
+          <View style={styles.headerContent}>
+            <Text style={styles.title}>Analytics</Text>
+            <Text style={styles.subtitle}>Track your business performance</Text>
+          </View>
         </View>
-
+        {/* Filter Buttons */}
+        <View style={{ flexDirection: 'row', justifyContent: 'center', marginVertical: 12 }}>
+          {['7days', 'today', 'month'].map((filter) => (
+            <TouchableOpacity
+              key={filter}
+              style={{
+                backgroundColor: selectedFilter === filter ? theme.colors.primary : theme.colors.surface,
+                paddingHorizontal: 16,
+                paddingVertical: 8,
+                borderRadius: 20,
+                marginHorizontal: 6,
+              }}
+              onPress={() => setSelectedFilter(filter as '7days' | 'today' | 'month')}
+            >
+              <Text style={{ color: selectedFilter === filter ? theme.colors.white : theme.colors.textPrimary }}>
+                {filter === '7days' ? 'Last 7 Days' : filter === 'today' ? 'Today' : 'This Month'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
         {loading ? (
           <ActivityIndicator size="large" color={theme.colors.primary} style={{ marginTop: 40 }} />
         ) : (
@@ -489,7 +442,7 @@ export default function AnalyticsScreen() {
               <Text style={{ textAlign: 'center', color: theme.colors.textSecondary, fontSize: 12, marginTop: 4 }}>Day</Text>
             </Card>
 
-            {/* Weekly Order Volume - updated to match Revenue Trend UI */}
+            {/* Weekly Order Volume - now using LineChart like Revenue Trend */}
             <Card style={styles.chartCard}>
               <Text style={styles.chartTitle}>Weekly Order Volume</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', position: 'relative' }}>
@@ -498,16 +451,8 @@ export default function AnalyticsScreen() {
                   <Text style={{ color: theme.colors.textSecondary, fontSize: 12, transform: [{ rotate: '-90deg' }], textAlign: 'center', width: 60, backgroundColor: 'transparent' }}>Orders</Text>
                 </View>
                 <View style={{ flex: 1, marginLeft: 10, zIndex: 1 }}>
-                  <BarChart
-                    data={{
-                      ...metrics.orderVolumeData,
-                      datasets: [
-                        {
-                          ...metrics.orderVolumeData.datasets[0],
-                          data: padOrderVolumeData(metrics.orderVolumeData.datasets[0].data),
-                        },
-                      ],
-                    }}
+                  <LineChart
+                    data={metrics.orderVolumeData}
                     width={screenWidth - 100}
                     height={260}
                     chartConfig={{
@@ -518,16 +463,14 @@ export default function AnalyticsScreen() {
                         strokeWidth: 1,
                       },
                     }}
+                    bezier
                     style={{ ...styles.chart, marginRight: 0, marginLeft: 0 }}
                     withInnerLines={true}
+                    withOuterLines={true}
                     withVerticalLabels={true}
                     withHorizontalLabels={true}
                     yAxisLabel=""
-                    yAxisSuffix=""
                     fromZero={true}
-                    showValuesOnTopOfBars={true}
-                    segments={getOrderVolumeSegments(metrics.orderVolumeData.datasets[0].data)}
-                    yAxisInterval={Math.ceil((Math.max(...metrics.orderVolumeData.datasets[0].data) + 6) / 6) || 1}
                   />
                 </View>
               </View>
@@ -551,56 +494,6 @@ export default function AnalyticsScreen() {
           </>
         )}
       </ScrollView>
-
-      {/* Date Picker Modal */}
-      {showDatePicker && (
-        <Modal
-          transparent={true}
-          animationType="slide"
-          visible={showDatePicker}
-          onRequestClose={() => setShowDatePicker(false)}
-        >
-          <View style={styles.datePickerModal}>
-            <View style={styles.datePickerContainer}>
-              <Text style={styles.datePickerTitle}>
-                Select {datePickerMode === 'start' ? 'Start' : 'End'} Date
-              </Text>
-              <DateTimePicker
-                value={datePickerMode === 'start' ? customDateRange.startDate : customDateRange.endDate}
-                mode="date"
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                onChange={handleDateChange}
-                maximumDate={new Date()}
-                minimumDate={new Date(Date.now() - 365 * 24 * 60 * 60 * 1000)} // 1 year ago
-              />
-              {Platform.OS === 'ios' && (
-                <View style={styles.datePickerButtons}>
-                  <TouchableOpacity
-                    style={[styles.datePickerButton, styles.cancelButton]}
-                    onPress={() => setShowDatePicker(false)}
-                  >
-                    <Text style={styles.cancelButtonText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.datePickerButton, styles.confirmButton]}
-                    onPress={() => {
-                      if (datePickerMode === 'start') {
-                        setDatePickerMode('end');
-                      } else {
-                        setShowDatePicker(false);
-                      }
-                    }}
-                  >
-                    <Text style={styles.confirmButtonText}>
-                      {datePickerMode === 'start' ? 'Next' : 'Done'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          </View>
-        </Modal>
-      )}
     </SafeAreaView>
   );
 }
@@ -634,43 +527,8 @@ const styles = StyleSheet.create({
     ...theme.typography.bodySmall,
     color: theme.colors.textSecondary,
   },
-  dateButton: {
-    padding: theme.spacing.sm,
-    borderRadius: theme.borderRadius.sm,
-    backgroundColor: theme.colors.surface,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-  },
-  dateRangeText: {
-    ...theme.typography.caption,
-    color: theme.colors.primary,
-    fontWeight: '600',
-  },
   content: {
     flex: 1,
-  },
-  filterContainer: {
-    flexDirection: 'row',
-    padding: theme.spacing.lg,
-    gap: theme.spacing.sm,
-  },
-  filterButton: {
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    borderRadius: theme.borderRadius.md,
-    backgroundColor: theme.colors.surface,
-  },
-  activeFilterButton: {
-    backgroundColor: theme.colors.primary,
-  },
-  filterButtonText: {
-    ...theme.typography.bodySmall,
-    color: theme.colors.textSecondary,
-    fontWeight: '600',
-  },
-  activeFilterButtonText: {
-    color: theme.colors.white,
   },
   metricsContainer: {
     flexDirection: 'row',
@@ -727,54 +585,5 @@ const styles = StyleSheet.create({
   },
   chart: {
     borderRadius: theme.borderRadius.md,
-  },
-  datePickerModal: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  datePickerContainer: {
-    backgroundColor: theme.colors.white,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing.lg,
-    margin: theme.spacing.lg,
-    minWidth: screenWidth * 0.8,
-  },
-  datePickerTitle: {
-    ...theme.typography.h3,
-    color: theme.colors.textPrimary,
-    textAlign: 'center',
-    marginBottom: theme.spacing.lg,
-  },
-  datePickerButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: theme.spacing.lg,
-    gap: theme.spacing.md,
-  },
-  datePickerButton: {
-    flex: 1,
-    paddingVertical: theme.spacing.md,
-    borderRadius: theme.borderRadius.md,
-    alignItems: 'center',
-  },
-  cancelButton: {
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  confirmButton: {
-    backgroundColor: theme.colors.primary,
-  },
-  cancelButtonText: {
-    ...theme.typography.bodySmall,
-    color: theme.colors.textSecondary,
-    fontWeight: '600',
-  },
-  confirmButtonText: {
-    ...theme.typography.bodySmall,
-    color: theme.colors.white,
-    fontWeight: '600',
   },
 });

@@ -51,6 +51,7 @@ export default function HistoryScreen() {
   const [invoiceModalVisible, setInvoiceModalVisible] = useState(false);
   const scrollY = new Animated.Value(0);
   const [showFloatingSearch, setShowFloatingSearch] = useState(false);
+  const [searchBarY, setSearchBarY] = useState(0);
   const [invoiceOrder, setInvoiceOrder] = useState<HistoryOrder | null>(null);
   const { profile: partnerProfile, saveProfile } = usePartnerProfile();
 
@@ -278,77 +279,77 @@ export default function HistoryScreen() {
     return 'zero rupees';
   }
 
+  const handleScroll = Animated.event(
+    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+    {
+      useNativeDriver: false,
+      listener: (event: any) => {
+        const offsetY = event.nativeEvent.contentOffset.y;
+        setShowFloatingSearch(offsetY > searchBarY + 10);
+      },
+    }
+  );
+
+  const onSearchLayout = (e: any) => {
+    setSearchBarY(e.nativeEvent.layout.y);
+  };
+
+  const renderSearchBar = () => (
+    <View style={styles.searchContainer} onLayout={onSearchLayout}>
+      <View style={styles.searchWrapper}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search orders..."
+          placeholderTextColor={theme.colors.textSecondary}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+      </View>
+    </View>
+  );
+
+  const renderFloatingSearch = () => (
+    <Animated.View style={styles.floatingSearchContainer}>
+      <View style={styles.searchWrapper}>
+        <TextInput
+          style={styles.floatingSearchInput}
+          placeholder="Search orders..."
+          placeholderTextColor={theme.colors.textSecondary}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+      </View>
+    </Animated.View>
+  );
+
   return (
     <SafeAreaView style={styles.container}>
-      {/* Enhanced Header */}
-      <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <Text style={styles.title}>Order History</Text>
-          <Text style={styles.subtitle}>View completed and past orders</Text>
-        </View>
-        <TouchableOpacity
-          style={styles.filterIconButton}
-          onPress={() => setFilterModalVisible(true)}
-        >
-          <Filter size={24} color={theme.colors.primary} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Enhanced Search Bar */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchWrapper}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search orders..."
-            placeholderTextColor={theme.colors.textSecondary}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-        </View>
-      </View>
-
-      {/* Floating Search Bar */}
-      {showFloatingSearch && (
-        <Animated.View 
-          style={[
-            styles.floatingSearchContainer,
-            {
-              transform: [{ translateY: scrollY.interpolate({
-                inputRange: [0, 100],
-                outputRange: [-100, 0],
-                extrapolate: 'clamp',
-              })}],
-            }
-          ]}
-        >
-          <View style={styles.floatingSearchWrapper}>
-            <TextInput
-              style={styles.floatingSearchInput}
-              placeholder="Search orders..."
-              placeholderTextColor={theme.colors.textSecondary}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
-          </View>
-        </Animated.View>
-      )}
-
-      <FlatList
+      <Animated.FlatList
         data={filteredOrders}
         keyExtractor={(item) => item.id}
         renderItem={renderOrderCard}
         contentContainerStyle={styles.listContainer}
         showsVerticalScrollIndicator={false}
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-          { 
-            useNativeDriver: true,
-            listener: (event: any) => {
-              const offsetY = event.nativeEvent.contentOffset.y;
-              setShowFloatingSearch(offsetY > 100);
-            }
-          }
-        )}
+        ListHeaderComponent={
+          <>
+            {/* Enhanced Header (now scrolls with content) */}
+            <View style={styles.header}>
+              <View style={styles.headerContent}>
+                <Text style={styles.title}>Order History</Text>
+                <Text style={styles.subtitle}>View completed and past orders</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.filterIconButton}
+                onPress={() => setFilterModalVisible(true)}
+              >
+                <Filter size={24} color={theme.colors.primary} />
+              </TouchableOpacity>
+            </View>
+            {/* Only show search bar if floating search is not visible */}
+            {!showFloatingSearch && renderSearchBar()}
+          </>
+        }
+        onScroll={handleScroll}
         scrollEventThrottle={16}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
@@ -359,6 +360,8 @@ export default function HistoryScreen() {
           </View>
         }
       />
+      {/* Floating search bar */}
+      {showFloatingSearch && renderFloatingSearch()}
 
       {/* Filter Modal */}
       <Modal

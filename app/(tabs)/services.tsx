@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  FlatList,
   TouchableOpacity,
   Alert,
   SafeAreaView,
@@ -11,6 +10,7 @@ import {
   Dimensions,
   Animated,
 } from 'react-native';
+import { FlatList as RNFlatList } from 'react-native';
 import { Plus, Search, Filter } from 'lucide-react-native';
 import { theme } from '@/constants/theme';
 import ServiceCard from '@/components/ServiceCard';
@@ -25,41 +25,41 @@ import {
 } from '@/utils/api';
 import Toast from 'react-native-toast-message';
 
-const mockServices: Service[] = [
-  {
-    id: '1',
-    name: 'Wash & Fold',
-    description: 'Basic washing and folding service',
-    price: 50,
-    apparelTypes: 'Cotton,Polyester',
-    isAvailable: true,
-    partnerId: 'lp001',
-    createdAt: '2025-01-15T10:30:00Z',
-    updatedAt: '2025-01-15T10:30:00Z',
-  },
-  {
-    id: '2',
-    name: 'Dry Cleaning',
-    description: 'Professional dry cleaning for delicate items',
-    price: 80,
-    apparelTypes: 'Silk,Wool,Cashmere',
-    isAvailable: true,
-    partnerId: 'lp001',
-    createdAt: '2025-01-16T11:15:00Z',
-    updatedAt: '2025-01-16T11:15:00Z',
-  },
-  {
-    id: '3',
-    name: 'Express Wash',
-    description: 'Quick wash service for urgent needs',
-    price: 150,
-    apparelTypes: 'Cotton,Denim',
-    isAvailable: false,
-    partnerId: 'lp001',
-    createdAt: '2025-01-17T09:45:00Z',
-    updatedAt: '2025-01-17T09:45:00Z',
-  },
-];
+// const mockServices: Service[] = [
+//   {
+//     id: '1',
+//     name: 'Wash & Fold',
+//     description: 'Basic washing and folding service',
+//     price: 50,
+//     apparelTypes: 'Cotton,Polyester',
+//     isAvailable: true,
+//     partnerId: 'lp001',
+//     createdAt: '2025-01-15T10:30:00Z',
+//     updatedAt: '2025-01-15T10:30:00Z',
+//   },
+//   {
+//     id: '2',
+//     name: 'Dry Cleaning',
+//     description: 'Professional dry cleaning for delicate items',
+//     price: 80,
+//     apparelTypes: 'Silk,Wool,Cashmere',
+//     isAvailable: true,
+//     partnerId: 'lp001',
+//     createdAt: '2025-01-16T11:15:00Z',
+//     updatedAt: '2025-01-16T11:15:00Z',
+//   },
+//   {
+//     id: '3',
+//     name: 'Express Wash',
+//     description: 'Quick wash service for urgent needs',
+//     price: 150,
+//     apparelTypes: 'Cotton,Denim',
+//     isAvailable: false,
+//     partnerId: 'lp001',
+//     createdAt: '2025-01-17T09:45:00Z',
+//     updatedAt: '2025-01-17T09:45:00Z',
+//   },
+// ];
 
 export default function ServicesScreen() {
   const [services, setServices] = useState<Service[]>([]);
@@ -67,7 +67,7 @@ export default function ServicesScreen() {
   const [editingService, setEditingService] = useState<Service | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedFilter, setSelectedFilter] = useState<'all' | 'available' | 'unavailable'>('all');
+  const [searchAvailability, setSearchAvailability] = useState<'all' | 'available' | 'unavailable'>('all');
   const screenWidth = Dimensions.get('window').width;
   const scrollY = new Animated.Value(0);
   const [showFloatingSearch, setShowFloatingSearch] = useState(false);
@@ -222,11 +222,9 @@ export default function ServicesScreen() {
     return `₹${service.price}`;
   };
 
-  // Filter and search services
-  const getFilteredServices = () => {
+  // Sort: available first, then unavailable
+  const getSortedFilteredServices = () => {
     let filtered = services;
-
-    // Apply search filter
     if (searchQuery.trim()) {
       filtered = filtered.filter(service =>
         service.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -234,49 +232,116 @@ export default function ServicesScreen() {
         (service.apparelTypes && service.apparelTypes.toLowerCase().includes(searchQuery.toLowerCase()))
       );
     }
-
-    // Apply availability filter
-    if (selectedFilter !== 'all') {
+    if (searchAvailability !== 'all') {
       filtered = filtered.filter(service =>
-        selectedFilter === 'available' ? service.isAvailable : !service.isAvailable
+        searchAvailability === 'available' ? service.isAvailable : !service.isAvailable
       );
     }
-
-    return filtered;
+    // Sort available first
+    return filtered.sort((a, b) => (a.isAvailable === b.isAvailable ? 0 : a.isAvailable ? -1 : 1));
   };
 
-  const renderFilterButton = (filter: 'all' | 'available' | 'unavailable', title: string) => {
-    const isActive = selectedFilter === filter;
-    let count = 0;
-    
-    if (filter === 'all') count = services.length;
-    else if (filter === 'available') count = services.filter(s => s.isAvailable).length;
-    else count = services.filter(s => !s.isAvailable).length;
+  // Remove filter tabs, move header and search bar into ListHeaderComponent
+  const renderHeader = () => (
+    <View>
+      <View style={styles.header}>
+        <View style={styles.headerContent}>
+          <Text style={styles.title}>Services</Text>
+          <Text style={styles.subtitle}>Manage your laundry services</Text>
+        </View>
+        <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
+          <Plus size={24} color={theme.colors.white} />
+        </TouchableOpacity>
+      </View>
+      <View style={styles.searchContainer}>
+        <View style={styles.searchWrapper}>
+          <Search size={20} color={theme.colors.textSecondary} style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search services, descriptions, apparel types..."
+            placeholderTextColor={theme.colors.textSecondary}
+            onChangeText={setSearchQuery}
+            value={searchQuery}
+          />
+          <TouchableOpacity
+            style={styles.availabilityDropdown}
+            onPress={() => {
+              setSearchAvailability(
+                searchAvailability === 'all'
+                  ? 'available'
+                  : searchAvailability === 'available'
+                  ? 'unavailable'
+                  : 'all'
+              );
+            }}
+          >
+            <Text style={styles.availabilityDropdownText}>
+              {searchAvailability === 'all'
+                ? 'All'
+                : searchAvailability === 'available'
+                ? 'Available'
+                : 'Unavailable'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </View>
+  );
 
-    return (
-      <TouchableOpacity
-        style={[
-          styles.filterButton,
-          isActive && styles.activeFilterButton,
-          { minWidth: screenWidth * 0.28 }
-        ]}
-        onPress={() => setSelectedFilter(filter)}
-      >
-        <Text style={[
-          styles.filterText,
-          isActive && styles.activeFilterText,
-          { fontSize: screenWidth < 350 ? 12 : 14 }
-        ]}>
-          {title}
-        </Text>
-        {count > 0 && (
-          <View style={styles.filterBadge}>
-            <Text style={styles.filterBadgeText}>{count}</Text>
-          </View>
-        )}
-      </TouchableOpacity>
-    );
+  // Floating search bar logic
+  const [searchBarY, setSearchBarY] = useState(0);
+
+  const handleScroll = Animated.event(
+    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+    {
+      useNativeDriver: false,
+      listener: (event: any) => {
+        const offsetY = event.nativeEvent.contentOffset.y;
+        setShowFloatingSearch(offsetY > searchBarY + 10);
+      },
+    }
+  );
+
+  // Measure search bar position
+  const onSearchLayout = (e: any) => {
+    setSearchBarY(e.nativeEvent.layout.y);
   };
+
+  // Render search bar for floating
+  const renderFloatingSearch = () => (
+    <Animated.View style={styles.floatingSearchContainer}>
+      <View style={styles.searchWrapper}>
+        <Search size={20} color={theme.colors.textSecondary} style={styles.searchIcon} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search services, descriptions, apparel types..."
+          placeholderTextColor={theme.colors.textSecondary}
+          onChangeText={setSearchQuery}
+          value={searchQuery}
+        />
+        <TouchableOpacity
+          style={styles.availabilityDropdown}
+          onPress={() => {
+            setSearchAvailability(
+              searchAvailability === 'all'
+                ? 'available'
+                : searchAvailability === 'available'
+                ? 'unavailable'
+                : 'all'
+            );
+          }}
+        >
+          <Text style={styles.availabilityDropdownText}>
+            {searchAvailability === 'all'
+              ? 'All'
+              : searchAvailability === 'available'
+              ? 'Available'
+              : 'Unavailable'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </Animated.View>
+  );
 
   const renderServiceCard = ({ item }: { item: Service }) => (
     <ServiceCard
@@ -289,81 +354,21 @@ export default function ServicesScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Enhanced Header */}
-      <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <Text style={styles.title}>Services</Text>
-          <Text style={styles.subtitle}>Manage your laundry services</Text>
-        </View>
-        <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
-          <Plus size={24} color={theme.colors.white} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchWrapper}>
-          <Search size={20} color={theme.colors.textSecondary} style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search services, descriptions, apparel types..."
-            placeholderTextColor={theme.colors.textSecondary}
-            onChangeText={setSearchQuery}
-            value={searchQuery}
-          />
-        </View>
-      </View>
-
-      {/* Floating Search Bar */}
-      {showFloatingSearch && (
-        <Animated.View 
-          style={[
-            styles.floatingSearchContainer,
-            {
-              transform: [{ translateY: scrollY.interpolate({
-                inputRange: [0, 100],
-                outputRange: [-100, 0],
-                extrapolate: 'clamp',
-              })}],
-            }
-          ]}
-        >
-          <View style={styles.floatingSearchWrapper}>
-            <Search size={18} color={theme.colors.textSecondary} style={styles.searchIcon} />
-            <TextInput
-              style={styles.floatingSearchInput}
-              placeholder="Search services..."
-              placeholderTextColor={theme.colors.textSecondary}
-              onChangeText={setSearchQuery}
-              value={searchQuery}
-            />
-          </View>
-        </Animated.View>
-      )}
-
-      {/* Filter Tabs */}
-      <View style={styles.filterContainer}>
-        {renderFilterButton('all', 'All')}
-        {renderFilterButton('available', 'Available')}
-        {renderFilterButton('unavailable', 'Unavailable')}
-      </View>
-
-      <FlatList
-        data={getFilteredServices()}
+      <Animated.FlatList
+        data={getSortedFilteredServices()}
         keyExtractor={(item) => item.id}
         renderItem={renderServiceCard}
         contentContainerStyle={styles.listContainer}
         showsVerticalScrollIndicator={false}
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-          { 
-            useNativeDriver: true,
-            listener: (event: any) => {
-              const offsetY = event.nativeEvent.contentOffset.y;
-              setShowFloatingSearch(offsetY > 100);
-            }
-          }
-        )}
+        ListHeaderComponent={
+          <View onLayout={onSearchLayout}>
+            {/* Header and search bar scroll with content */}
+            {renderHeader()}
+            {/* Only show search bar if floating search is not visible */}
+            {!showFloatingSearch && null}
+          </View>
+        }
+        onScroll={handleScroll}
         scrollEventThrottle={16}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
@@ -375,7 +380,8 @@ export default function ServicesScreen() {
           </View>
         }
       />
-
+      {/* Floating search bar */}
+      {showFloatingSearch && renderFloatingSearch()}
       <ServiceFormModal
         visible={modalVisible}
         formData={formData}
@@ -450,53 +456,21 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing.md,
     paddingRight: theme.spacing.sm,
   },
-  filterContainer: {
-    flexDirection: 'row',
-    backgroundColor: theme.colors.white,
-    paddingHorizontal: theme.spacing.lg,
-    paddingBottom: theme.spacing.md,
-    gap: theme.spacing.xs,
-  },
-  filterButton: {
-    flex: 1,
-    flexDirection: 'row',
-    paddingVertical: theme.spacing.md,
-    paddingHorizontal: theme.spacing.sm,
-    borderRadius: theme.borderRadius.lg,
+  availabilityDropdown: {
+    marginLeft: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     backgroundColor: theme.colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: theme.spacing.xs,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  activeFilterButton: {
-    backgroundColor: theme.colors.primary,
-    borderColor: theme.colors.primary,
-    ...theme.shadows.sm,
-  },
-  filterText: {
-    ...theme.typography.bodySmall,
-    color: theme.colors.textSecondary,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  activeFilterText: {
-    color: theme.colors.white,
-  },
-  filterBadge: {
-    backgroundColor: theme.colors.secondary,
-    borderRadius: 10,
-    minWidth: 18,
-    height: 18,
-    alignItems: 'center',
+    borderColor: theme.colors.border,
     justifyContent: 'center',
+    alignItems: 'center',
   },
-  filterBadgeText: {
-    ...theme.typography.caption,
-    color: theme.colors.primary,
-    fontWeight: '700',
-    fontSize: 10,
+  availabilityDropdownText: {
+    color: theme.colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
   },
   listContainer: {
     paddingVertical: theme.spacing.md,
@@ -511,22 +485,6 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing.md,
     zIndex: 1000,
     ...theme.shadows.md,
-  },
-  floatingSearchWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.borderRadius.lg,
-    paddingHorizontal: theme.spacing.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  floatingSearchInput: {
-    flex: 1,
-    ...theme.typography.body,
-    color: theme.colors.textPrimary,
-    paddingVertical: theme.spacing.sm,
-    paddingRight: theme.spacing.sm,
   },
   emptyContainer: {
     flex: 1,

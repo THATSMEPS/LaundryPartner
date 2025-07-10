@@ -22,6 +22,7 @@ import Card from '@/components/Card';
 import Button from '@/components/Button';
 import { getPartnerProfile, updatePartnerProfile, getAreas } from '@/utils/api';
 import { getItem, setItem } from '@/utils/storage';
+import { Animated } from 'react-native';
 
 interface ProfileData {
   businessName: string;
@@ -333,7 +334,7 @@ export default function ProfileScreen() {
   };
 
   const updateEditData = (field: string, value: any) => {
-    console.log('Updating field', field, 'with value', value);
+    // console.log('Updating field', field, 'with value', value);
     setEditData(prev => {
       if (!prev) return prev;
       return {
@@ -646,7 +647,7 @@ export default function ProfileScreen() {
         )}
       </View>
 
-      <ScrollView 
+      <Animated.ScrollView 
         style={styles.content} 
         showsVerticalScrollIndicator={false}
         onScroll={() => {
@@ -834,7 +835,7 @@ export default function ProfileScreen() {
             />
           </View>
         )}
-      </ScrollView>
+      </Animated.ScrollView>
     </SafeAreaView>
   );
 }
