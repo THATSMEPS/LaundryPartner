@@ -8,6 +8,7 @@ import Toast from 'react-native-toast-message';
 import { theme } from '@/constants/theme';
 import { StyleSheet, Text } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { getPartnerProfile } from '@/utils/api';
 
 const toastConfig = {
   info: (props: any) => (
@@ -64,15 +65,40 @@ export default function RootLayout() {
   const pathname = usePathname();
 
   useEffect(() => {
-    const checkToken = async () => {
+    const checkAuthAndPartner = async () => {
       const token = await AsyncStorage.getItem('token');
       const publicRoutes = ['/login', '/signup', '/otp-verification'];
       if (!token && !publicRoutes.includes(pathname)) {
         router.replace('/login');
+        setCheckingAuth(false);
+        return;
+      }
+      // If token exists, check if partner profile exists in DB
+      if (token && !publicRoutes.includes(pathname)) {
+        try {
+          const res = await getPartnerProfile();
+          if (!res || !res.data) {
+            await AsyncStorage.removeItem('token');
+            await AsyncStorage.removeItem('partner');
+            router.replace('/login');
+            setCheckingAuth(false);
+            return;
+          }
+        } catch (e) {
+          // If error is 404 or not found, treat as missing partner
+          const err: any = e;
+          if (err?.response?.status === 404 || (err?.message && typeof err.message === 'string' && err.message.toLowerCase().includes('not found'))) {
+            await AsyncStorage.removeItem('token');
+            await AsyncStorage.removeItem('partner');
+            router.replace('/login');
+            setCheckingAuth(false);
+            return;
+          }
+        }
       }
       setCheckingAuth(false);
     };
-    checkToken();
+    checkAuthAndPartner();
   }, [pathname]);
 
   if (checkingAuth) {

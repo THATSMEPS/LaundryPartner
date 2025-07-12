@@ -38,9 +38,9 @@ export default function SignupScreen() {
       street: '',
       city: '',
       pincode: '',
-      state: 'Gujarat',
+      state: '', // Default blank
     },
-    areaId: '',
+    areaId: '', // Default blank
     apparelTypes: '',
     operating_radius: 5,
   });
@@ -49,66 +49,112 @@ export default function SignupScreen() {
   const [uploading, setUploading] = useState(false);
 
   // DropdownPicker component for compact dropdown selection
+  // Add a prop: searchable (default false)
   const DropdownPicker = ({ 
     options, 
     value, 
     onChange, 
-    placeholder 
+    placeholder,
+    searchable = false
   }: { 
     options: { label: string; value: string }[]; 
     value: string; 
     onChange: (val: string) => void; 
-    placeholder: string 
+    placeholder: string,
+    searchable?: boolean
   }) => {
     const [showDropdown, setShowDropdown] = useState(false);
+    const [searchText, setSearchText] = useState('');
     const dropdownRef = useRef<View>(null);
+
+    // Reset searchText when value changes
+    React.useEffect(() => {
+      setSearchText('');
+    }, [value]);
 
     // Find the label for the current value
     const displayLabel = () => {
       const found = options.find(opt => opt.value === value);
-      return found ? found.label : placeholder;
+      return found ? found.label : '';
     };
 
     const handleSelect = (item: { label: string; value: string }) => {
       onChange(item.value);
       setShowDropdown(false);
+      setSearchText('');
       Keyboard.dismiss();
     };
 
     const toggleDropdown = () => {
       setShowDropdown(!showDropdown);
+      if (!showDropdown && searchable) {
+        setTimeout(() => {
+          // Focus the input if needed
+        }, 100);
+      }
       if (showDropdown) {
         Keyboard.dismiss();
       }
     };
 
     const handleBlur = () => {
-      // Delay hiding dropdown to allow tap events to register
       setTimeout(() => {
         setShowDropdown(false);
+        setSearchText('');
       }, 100);
     };
 
+    // Filter options if searchable
+    const filteredOptions = searchable && searchText
+      ? options.filter(opt =>
+          opt.label.toLowerCase().includes(searchText.toLowerCase())
+        )
+      : options;
+
     return (
       <View style={{ position: 'relative' }}>
-        {/* Dropdown button */}
-        <TouchableOpacity 
-          style={styles.pickerButton}
-          onPress={toggleDropdown}
-          activeOpacity={0.7}
-        >
-          <View style={styles.pickerButtonContent}>
-            <Text 
-              style={value ? styles.pickerSelectedText : styles.pickerPlaceholderText}
-              numberOfLines={1}
-            >
-              {displayLabel()}
-            </Text>
-            <View style={styles.dropdownIcon}>
-              <Text style={styles.dropdownArrow}>{showDropdown ? '▲' : '▼'}</Text>
+        {/* Dropdown button or input */}
+        {searchable ? (
+          <TouchableWithoutFeedback onPress={toggleDropdown}>
+            <View>
+              <TextInput
+                style={styles.input}
+                value={showDropdown ? searchText : displayLabel() || searchText}
+                onFocus={() => setShowDropdown(true)}
+                onBlur={handleBlur}
+                onChangeText={text => {
+                  setSearchText(text);
+                  setShowDropdown(true);
+                }}
+                placeholder={placeholder}
+                placeholderTextColor={theme.colors.textSecondary}
+                autoCorrect={false}
+                autoCapitalize="none"
+              />
+              <View style={{ position: 'absolute', right: 12, top: 14 }}>
+                <Text style={styles.dropdownArrow}>{showDropdown ? '▲' : '▼'}</Text>
+              </View>
             </View>
-          </View>
-        </TouchableOpacity>
+          </TouchableWithoutFeedback>
+        ) : (
+          <TouchableOpacity 
+            style={styles.pickerButton}
+            onPress={toggleDropdown}
+            activeOpacity={0.7}
+          >
+            <View style={styles.pickerButtonContent}>
+              <Text 
+                style={value ? styles.pickerSelectedText : styles.pickerPlaceholderText}
+                numberOfLines={1}
+              >
+                {displayLabel() || placeholder}
+              </Text>
+              <View style={styles.dropdownIcon}>
+                <Text style={styles.dropdownArrow}>{showDropdown ? '▲' : '▼'}</Text>
+              </View>
+            </View>
+          </TouchableOpacity>
+        )}
 
         {/* Dropdown options */}
         {showDropdown && (
@@ -121,7 +167,7 @@ export default function SignupScreen() {
               nestedScrollEnabled={true}
               keyboardShouldPersistTaps="handled"
             >
-              {options.map(item => (
+              {filteredOptions.length > 0 ? filteredOptions.map(item => (
                 <TouchableOpacity
                   key={item.value}
                   style={[
@@ -140,7 +186,11 @@ export default function SignupScreen() {
                     {item.label}
                   </Text>
                 </TouchableOpacity>
-              ))}
+              )) : (
+                <View style={{ padding: 16 }}>
+                  <Text style={styles.dropdownText}>No results found</Text>
+                </View>
+              )}
             </ScrollView>
           </View>
         )}
@@ -151,9 +201,9 @@ export default function SignupScreen() {
   useEffect(() => {
     (async () => {
       try {
-        console.log("Fetching areas...");
+        // console.log("Fetching areas...");
         const res = await getAreas();
-        console.log("Areas API response:", res);
+        // console.log("Areas API response:", res);
         
         // Handle various possible response structures
         let areasData = [];
@@ -173,13 +223,13 @@ export default function SignupScreen() {
           (area: any) => area && area.id && area.areaName
         );
         
-        console.log("Processed areas data:", validAreas);
+        // console.log("Processed areas data:", validAreas);
         
         if (validAreas.length > 0) {
           setAreas(validAreas);
           await setItem('areas', validAreas);
         } else {
-          console.log("No valid areas data found, using fallback");
+          // console.log("No valid areas data found, using fallback");
           // Fallback data in case API returns empty
           const fallbackAreas = [
             { id: "area1", areaName: "Ahmedabad" },
@@ -207,15 +257,7 @@ export default function SignupScreen() {
     })();
   }, []);
 
-  useEffect(() => {
-    // If we have areas loaded and no area selected yet, select the first one
-    if (areas.length > 0 && !formData.areaId) {
-      setFormData(prev => ({
-        ...prev,
-        areaId: areas[0].id
-      }));
-    }
-  }, [areas]);
+  // Remove auto-select for areaId, keep blank until user selects
 
   const handleInputChange = (field: string, value: string) => {
     if (field === 'phone') {
@@ -299,7 +341,7 @@ export default function SignupScreen() {
         operating_radius: Number(formData.operating_radius),
       };
       const response = await registerPartner(regData);
-      console.log('registerPartner response:', response);
+      // console.log('registerPartner response:', response);
       const email = response?.data?.email || formData.email;
       // Upload profile banner if selected
       if (profileImage) {
@@ -345,19 +387,19 @@ export default function SignupScreen() {
               placeholderTextColor={theme.colors.textSecondary}
             />
           </View>
-          <View style={[styles.inputContainer, { zIndex: 2 }]}>
-            <Text style={styles.label}>Owner's Name</Text>
-            
-          </View>
-          <View style={[styles.inputContainer, { zIndex: 3 }]}>
-            <Text style={styles.label}>Phone Number</Text>
-            <TextInput
-              style={styles.input}
-              value={formData.phone}
-              onChangeText={(value) => handleInputChange('phone', value)}
-              placeholder="Enter phone number"
-              placeholderTextColor={theme.colors.textSecondary}
-              keyboardType="phone-pad"
+          <View style={[styles.inputContainer, { zIndex: 20 }]}> 
+            <Text style={styles.label}>State</Text>
+            <DropdownPicker
+              options={[
+                { label: 'Gujarat', value: 'Gujarat' },
+                { label: 'Maharashtra', value: 'Maharashtra' },
+                { label: 'Delhi', value: 'Delhi' },
+                { label: 'Karnataka', value: 'Karnataka' },
+                { label: 'Tamil Nadu', value: 'Tamil Nadu' },
+              ]}
+              value={formData.address.state}
+              onChange={val => setFormData(prev => ({ ...prev, address: { ...prev.address, state: val } }))}
+              placeholder="Select state"
             />
           </View>
           <Text style={styles.sectionTitle}>Address Information</Text>
@@ -407,13 +449,14 @@ export default function SignupScreen() {
               placeholder="Select state"
             />
           </View>
-          <View style={[styles.inputContainer, { zIndex: 19 }]}>
+          <View style={[styles.inputContainer, { zIndex: 19 }]}> 
             <Text style={styles.label}>Service Area</Text>
             <DropdownPicker
               options={areas.map(area => ({ label: area.areaName, value: area.id }))}
               value={formData.areaId}
               onChange={val => setFormData(prev => ({ ...prev, areaId: val }))}
               placeholder="Select service area"
+              searchable={true}
             />
           </View>
           <View style={[styles.inputContainer, { zIndex: 18 }]}>
