@@ -269,7 +269,8 @@ export default function ServicesScreen() {
   );
 
   // Floating search bar logic
-  const [searchBarY, setSearchBarY] = useState(0);
+  const [headerHeight, setHeaderHeight] = useState(0);
+  const [searchBarHeight, setSearchBarHeight] = useState(0);
 
   const handleScroll = Animated.event(
     [{ nativeEvent: { contentOffset: { y: scrollY } } }],
@@ -277,14 +278,18 @@ export default function ServicesScreen() {
       useNativeDriver: false,
       listener: (event: any) => {
         const offsetY = event.nativeEvent.contentOffset.y;
-        setShowFloatingSearch(offsetY > searchBarY + 10);
+        // Show floating search only when header+search bar is fully out of view
+        setShowFloatingSearch(offsetY >= headerHeight + searchBarHeight - 10);
       },
     }
   );
 
-  // Measure search bar position
-  const onSearchLayout = (e: any) => {
-    setSearchBarY(e.nativeEvent.layout.y);
+  // Measure header and search bar heights
+  const onHeaderLayout = (e: any) => {
+    setHeaderHeight(e.nativeEvent.layout.height);
+  };
+  const onSearchBarLayout = (e: any) => {
+    setSearchBarHeight(e.nativeEvent.layout.height);
   };
 
   // Render search bar for floating
@@ -341,11 +346,54 @@ export default function ServicesScreen() {
         contentContainerStyle={styles.listContainer}
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={
-          <View onLayout={onSearchLayout}>
-            {/* Header and search bar scroll with content */}
-            {renderHeader()}
-            {/* Only show search bar if floating search is not visible */}
-            {!showFloatingSearch && null}
+          <View>
+            <View onLayout={onHeaderLayout}>
+              {/* Header */}
+              <View style={styles.header}>
+                <View style={styles.headerContent}>
+                  <Text style={styles.title}>Services</Text>
+                  <Text style={styles.subtitle}>Manage your laundry services</Text>
+                </View>
+                <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
+                  <Plus size={24} color={theme.colors.white} />
+                </TouchableOpacity>
+              </View>
+            </View>
+            <View onLayout={onSearchBarLayout}>
+              {/* Search bar */}
+              <View style={styles.searchContainer}>
+                <View style={styles.searchWrapper}>
+                  <Search size={20} color={theme.colors.textSecondary} style={styles.searchIcon} />
+                  <TextInput
+                    style={styles.searchInput}
+                    placeholder="Search services, descriptions, apparel types..."
+                    placeholderTextColor={theme.colors.textSecondary}
+                    onChangeText={setSearchQuery}
+                    value={searchQuery}
+                  />
+                  <TouchableOpacity
+                    style={styles.availabilityDropdown}
+                    onPress={() => {
+                      setSearchAvailability(
+                        searchAvailability === 'all'
+                          ? 'available'
+                          : searchAvailability === 'available'
+                          ? 'unavailable'
+                          : 'all'
+                      );
+                    }}
+                  >
+                    <Text style={styles.availabilityDropdownText}>
+                      {searchAvailability === 'all'
+                        ? 'All'
+                        : searchAvailability === 'available'
+                        ? 'Available'
+                        : 'Unavailable'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
           </View>
         }
         onScroll={handleScroll}
