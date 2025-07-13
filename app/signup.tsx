@@ -44,159 +44,173 @@ export default function SignupScreen() {
     apparelTypes: '',
     operating_radius: 5,
   });
-  const [areas, setAreas] = useState<{ id: string; areaName: string }[]>([]);
+  // Allow areas to have extra fields for autofill
+  const [areas, setAreas] = useState<any[]>([]);
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  // DropdownPicker component for compact dropdown selection
-  // Add a prop: searchable (default false)
-  const DropdownPicker = ({ 
-    options, 
-    value, 
-    onChange, 
-    placeholder,
-    searchable = false
-  }: { 
-    options: { label: string; value: string }[]; 
-    value: string; 
-    onChange: (val: string) => void; 
-    placeholder: string,
-    searchable?: boolean
-  }) => {
-    const [showDropdown, setShowDropdown] = useState(false);
-    const [searchText, setSearchText] = useState('');
-    const dropdownRef = useRef<View>(null);
+  // Fixed DropdownPicker component
+const DropdownPicker = ({ 
+  options, 
+  value, 
+  onChange, 
+  placeholder,
+  searchable = false
+}: { 
+  options: { label: string; value: string }[]; 
+  value: string; 
+  onChange: (val: string) => void; 
+  placeholder: string,
+  searchable?: boolean
+}) => {
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [searchText, setSearchText] = useState('');
+  const dropdownRef = useRef<View>(null);
 
-    // Reset searchText when value changes
-    React.useEffect(() => {
+  // Find the label for the current value
+  const displayLabel = () => {
+    const found = options.find(opt => opt.value === value);
+    return found ? found.label : '';
+  };
+
+  const handleSelect = (item: { label: string; value: string }) => {
+    onChange(item.value);
+    setSearchText(''); // Clear search text immediately
+    setShowDropdown(false);
+    Keyboard.dismiss();
+  };
+
+  const toggleDropdown = () => {
+    if (!showDropdown) {
+      setShowDropdown(true);
+      // Clear search text when opening dropdown
       setSearchText('');
-    }, [value]);
-
-    // Find the label for the current value
-    const displayLabel = () => {
-      const found = options.find(opt => opt.value === value);
-      return found ? found.label : '';
-    };
-
-    const handleSelect = (item: { label: string; value: string }) => {
-      onChange(item.value);
+    } else {
       setShowDropdown(false);
       setSearchText('');
       Keyboard.dismiss();
-    };
-
-    const toggleDropdown = () => {
-      setShowDropdown(!showDropdown);
-      if (!showDropdown && searchable) {
-        setTimeout(() => {
-          // Focus the input if needed
-        }, 100);
-      }
-      if (showDropdown) {
-        Keyboard.dismiss();
-      }
-    };
-
-    const handleBlur = () => {
-      setTimeout(() => {
-        setShowDropdown(false);
-        setSearchText('');
-      }, 100);
-    };
-
-    // Filter options if searchable
-    const filteredOptions = searchable && searchText
-      ? options.filter(opt =>
-          opt.label.toLowerCase().includes(searchText.toLowerCase())
-        )
-      : options;
-
-    return (
-      <View style={{ position: 'relative' }}>
-        {/* Dropdown button or input */}
-        {searchable ? (
-          <TouchableWithoutFeedback onPress={toggleDropdown}>
-            <View>
-              <TextInput
-                style={styles.input}
-                value={showDropdown ? searchText : displayLabel() || searchText}
-                onFocus={() => setShowDropdown(true)}
-                onBlur={handleBlur}
-                onChangeText={text => {
-                  setSearchText(text);
-                  setShowDropdown(true);
-                }}
-                placeholder={placeholder}
-                placeholderTextColor={theme.colors.textSecondary}
-                autoCorrect={false}
-                autoCapitalize="none"
-              />
-              <View style={{ position: 'absolute', right: 12, top: 14 }}>
-                <Text style={styles.dropdownArrow}>{showDropdown ? '▲' : '▼'}</Text>
-              </View>
-            </View>
-          </TouchableWithoutFeedback>
-        ) : (
-          <TouchableOpacity 
-            style={styles.pickerButton}
-            onPress={toggleDropdown}
-            activeOpacity={0.7}
-          >
-            <View style={styles.pickerButtonContent}>
-              <Text 
-                style={value ? styles.pickerSelectedText : styles.pickerPlaceholderText}
-                numberOfLines={1}
-              >
-                {displayLabel() || placeholder}
-              </Text>
-              <View style={styles.dropdownIcon}>
-                <Text style={styles.dropdownArrow}>{showDropdown ? '▲' : '▼'}</Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-        )}
-
-        {/* Dropdown options */}
-        {showDropdown && (
-          <View 
-            ref={dropdownRef}
-            style={styles.dropdownListContainer}
-          >
-            <ScrollView 
-              style={styles.dropdownList}
-              nestedScrollEnabled={true}
-              keyboardShouldPersistTaps="handled"
-            >
-              {filteredOptions.length > 0 ? filteredOptions.map(item => (
-                <TouchableOpacity
-                  key={item.value}
-                  style={[
-                    styles.dropdownItem,
-                    value === item.value && styles.selectedOptionItem
-                  ]}
-                  onPress={() => handleSelect(item)}
-                  activeOpacity={0.7}
-                >
-                  <Text 
-                    style={[
-                      styles.dropdownText,
-                      value === item.value && styles.selectedOptionText
-                    ]}
-                  >
-                    {item.label}
-                  </Text>
-                </TouchableOpacity>
-              )) : (
-                <View style={{ padding: 16 }}>
-                  <Text style={styles.dropdownText}>No results found</Text>
-                </View>
-              )}
-            </ScrollView>
-          </View>
-        )}
-      </View>
-    );
+    }
   };
+
+  const handleBlur = () => {
+    // Longer delay to allow for item selection when keyboard is open
+    setTimeout(() => {
+      setShowDropdown(false);
+      setSearchText('');
+    }, 300);
+  };
+
+  const handleSearchChange = (text: string) => {
+    setSearchText(text);
+    if (!showDropdown) {
+      setShowDropdown(true);
+    }
+  };
+
+  // Filter options if searchable
+  const filteredOptions = searchable && searchText
+    ? options.filter(opt =>
+        opt.label.toLowerCase().includes(searchText.toLowerCase())
+      )
+    : options;
+
+  // Handle Enter key press for selection
+  const handleKeyPress = () => {
+    if (searchable && searchText && filteredOptions.length > 0) {
+      // Select the first matching option
+      handleSelect(filteredOptions[0]);
+    }
+  };
+
+  return (
+    <View style={{ position: 'relative' }}>
+      {/* Dropdown button or input */}
+      {searchable ? (
+        <TouchableWithoutFeedback onPress={toggleDropdown}>
+          <View>
+            <TextInput
+              style={styles.input}
+              value={showDropdown ? searchText : (displayLabel() || '')}
+              onFocus={() => {
+                setShowDropdown(true);
+                setSearchText('');
+              }}
+              onBlur={handleBlur}
+              onChangeText={handleSearchChange}
+              onSubmitEditing={handleKeyPress} // Handle Enter key
+              placeholder={placeholder}
+              placeholderTextColor={theme.colors.textSecondary}
+              autoCorrect={false}
+              autoCapitalize="none"
+              returnKeyType="done"
+            />
+            <View style={{ position: 'absolute', right: 12, top: 14 }}>
+              <Text style={styles.dropdownArrow}>{showDropdown ? '▲' : '▼'}</Text>
+            </View>
+          </View>
+        </TouchableWithoutFeedback>
+      ) : (
+        <TouchableOpacity 
+          style={styles.pickerButton}
+          onPress={toggleDropdown}
+          activeOpacity={0.7}
+        >
+          <View style={styles.pickerButtonContent}>
+            <Text 
+              style={value ? styles.pickerSelectedText : styles.pickerPlaceholderText}
+              numberOfLines={1}
+            >
+              {displayLabel() || placeholder}
+            </Text>
+            <View style={styles.dropdownIcon}>
+              <Text style={styles.dropdownArrow}>{showDropdown ? '▲' : '▼'}</Text>
+            </View>
+          </View>
+        </TouchableOpacity>
+      )}
+
+      {/* Dropdown options */}
+      {showDropdown && (
+        <View 
+          ref={dropdownRef}
+          style={styles.dropdownListContainer}
+        >
+          <ScrollView 
+            style={styles.dropdownList}
+            nestedScrollEnabled={true}
+            keyboardShouldPersistTaps="always"
+          >
+            {filteredOptions.length > 0 ? filteredOptions.map(item => (
+              <TouchableOpacity
+                key={item.value}
+                style={[
+                  styles.dropdownItem,
+                  value === item.value && styles.selectedOptionItem
+                ]}
+                onPress={() => handleSelect(item)}
+                activeOpacity={0.7}
+              >
+                <Text 
+                  style={[
+                    styles.dropdownText,
+                    value === item.value && styles.selectedOptionText
+                  ]}
+                >
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            )) : (
+              <View style={{ padding: 16 }}>
+                <Text style={styles.dropdownText}>No results found</Text>
+              </View>
+            )}
+          </ScrollView>
+        </View>
+      )}
+    </View>
+  );
+};
+
 
   useEffect(() => {
     (async () => {
@@ -377,13 +391,81 @@ export default function SignupScreen() {
           <Text style={styles.subtitle}>Join our partner network</Text>
         </View>
         <View style={styles.form}>
-          <View style={[styles.inputContainer, { zIndex: 1 }]}>
+          <View style={[styles.inputContainer, { zIndex: 1 }]}> 
             <Text style={styles.label}>Business Name</Text>
             <TextInput
               style={styles.input}
               value={formData.businessName}
               onChangeText={(value) => handleInputChange('businessName', value)}
               placeholder="Enter your business name"
+              placeholderTextColor={theme.colors.textSecondary}
+            />
+          </View>
+          <View style={[styles.inputContainer, { zIndex: 19 }]}> 
+            <Text style={styles.label}>Mobile</Text>
+            <TextInput
+              style={styles.input}
+              value={formData.phone}
+              onChangeText={(value) => handleInputChange('phone', value)}
+              placeholder="Enter your mobile number"
+              placeholderTextColor={theme.colors.textSecondary}
+              keyboardType="phone-pad"
+              maxLength={10}
+            />
+          </View>
+          <Text style={styles.sectionTitle}>Address Information</Text>
+          <View style={[styles.inputContainer, { zIndex: 4 }]}> 
+            <Text style={styles.label}>Street Address</Text>
+            <TextInput
+              style={styles.input}
+              value={formData.address.street}
+              onChangeText={(value) => setFormData(prev => ({ ...prev, address: { ...prev.address, street: value } }))}
+              placeholder="Enter street address"
+              placeholderTextColor={theme.colors.textSecondary}
+            />
+          </View>
+          <View style={[styles.inputContainer, { zIndex: 19 }]}> 
+            <Text style={styles.label}>Service Area</Text>
+            <DropdownPicker
+              options={areas.map(area => ({ label: area.areaName, value: area.id }))}
+              value={formData.areaId}
+              onChange={val => {
+                setFormData(prev => {
+                  const selectedArea = areas.find(a => a.id === val);
+                  return {
+                    ...prev,
+                    areaId: val,
+                    address: {
+                      ...prev.address,
+                      pincode: selectedArea?.pincode || '',
+                      city: selectedArea?.city || '',
+                      state: selectedArea?.state || '',
+                    }
+                  };
+                });
+              }}
+              placeholder="Select service area"
+              searchable={true}
+            />
+          </View>
+          <View style={[styles.inputContainer, { zIndex: 6 }]}> 
+            <Text style={styles.label}>Pincode</Text>
+            <TextInput
+              style={styles.input}
+              value={formData.address.pincode}
+              onChangeText={(value) => setFormData(prev => ({ ...prev, address: { ...prev.address, pincode: value } }))}
+              placeholder="Enter pincode"
+              placeholderTextColor={theme.colors.textSecondary}
+              keyboardType="number-pad"
+            />
+          </View>
+          <View style={[styles.inputContainer, { zIndex: 5 }]}> 
+            <Text style={styles.label}>City</Text>
+            <TextInput
+              style={styles.input}
+              value={formData.address.city}
+              onChangeText={(value) => setFormData(prev => ({ ...prev, address: { ...prev.address, city: value } }))}
+              placeholder="Enter city"
               placeholderTextColor={theme.colors.textSecondary}
             />
           </View>
@@ -400,63 +482,6 @@ export default function SignupScreen() {
               value={formData.address.state}
               onChange={val => setFormData(prev => ({ ...prev, address: { ...prev.address, state: val } }))}
               placeholder="Select state"
-            />
-          </View>
-          <Text style={styles.sectionTitle}>Address Information</Text>
-          <View style={[styles.inputContainer, { zIndex: 4 }]}>
-            <Text style={styles.label}>Street Address</Text>
-            <TextInput
-              style={styles.input}
-              value={formData.address.street}
-              onChangeText={(value) => setFormData(prev => ({ ...prev, address: { ...prev.address, street: value } }))}
-              placeholder="Enter street address"
-              placeholderTextColor={theme.colors.textSecondary}
-            />
-          </View>
-          <View style={[styles.inputContainer, { zIndex: 5 }]}>
-            <Text style={styles.label}>City</Text>
-            <TextInput
-              style={styles.input}
-              value={formData.address.city}
-              onChangeText={(value) => setFormData(prev => ({ ...prev, address: { ...prev.address, city: value } }))}
-              placeholder="Enter city"
-              placeholderTextColor={theme.colors.textSecondary}
-            />
-          </View>
-          <View style={[styles.inputContainer, { zIndex: 6 }]}>
-            <Text style={styles.label}>Pincode</Text>
-            <TextInput
-              style={styles.input}
-              value={formData.address.pincode}
-              onChangeText={(value) => setFormData(prev => ({ ...prev, address: { ...prev.address, pincode: value } }))}
-              placeholder="Enter pincode"
-              placeholderTextColor={theme.colors.textSecondary}
-              keyboardType="number-pad"
-            />
-          </View>
-          <View style={[styles.inputContainer, { zIndex: 20 }]}>
-            <Text style={styles.label}>State</Text>
-            <DropdownPicker
-              options={[
-                { label: 'Gujarat', value: 'Gujarat' },
-                { label: 'Maharashtra', value: 'Maharashtra' },
-                { label: 'Delhi', value: 'Delhi' },
-                { label: 'Karnataka', value: 'Karnataka' },
-                { label: 'Tamil Nadu', value: 'Tamil Nadu' },
-              ]}
-              value={formData.address.state}
-              onChange={val => setFormData(prev => ({ ...prev, address: { ...prev.address, state: val } }))}
-              placeholder="Select state"
-            />
-          </View>
-          <View style={[styles.inputContainer, { zIndex: 19 }]}> 
-            <Text style={styles.label}>Service Area</Text>
-            <DropdownPicker
-              options={areas.map(area => ({ label: area.areaName, value: area.id }))}
-              value={formData.areaId}
-              onChange={val => setFormData(prev => ({ ...prev, areaId: val }))}
-              placeholder="Select service area"
-              searchable={true}
             />
           </View>
           <View style={[styles.inputContainer, { zIndex: 18 }]}>
