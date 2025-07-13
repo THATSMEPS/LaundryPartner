@@ -67,26 +67,17 @@ export async function apiUploadRequest(endpoint: string, formData: FormData, aut
 
 // Auth APIs
 export const loginPartner = (body: any) => apiRequest('/partner/login', { method: 'POST', body: JSON.stringify(body) }, false);
-export const registerPartner = async (body: any, bannerUri?: string, bannerFileName?: string) => {
-  if (bannerUri) {
-    const formData = new FormData();
-    for (const key in body) {
-      formData.append(key, body[key]);
-    }
-    formData.append('banner', {
-      uri: bannerUri,
-      type: getMimeType(bannerFileName || 'banner.jpg'),
-      name: bannerFileName || 'banner.jpg',
-    } as any);
-    return apiUploadRequest('/partner/register', formData, false);
-  } else {
-    return apiRequest('/partner/register', { method: 'POST', body: JSON.stringify(body) }, false);
-  }
+export const registerPartner = async (body: any) => {
+  // Always send only the registration data, never the banner
+  return apiRequest('/partner/register', { method: 'POST', body: JSON.stringify(body) }, false);
 };
 export const verifyPartner = (body: any) => apiRequest('/partner/verify', { method: 'POST', body: JSON.stringify(body) }, false);
 
 // Area APIs
 export const getAreas = () => apiRequest('/areas', {method: 'GET'}, false);
+
+// Apparel Types API
+export const getApparelTypes = () => apiRequest('/apparel-types/apparel-types', { method: 'GET' }, false);
 
 // Orders
 export const getPartnerOrders = (params = '') => apiRequest(`/partner/orders${params ? '?' + params : ''}`);
@@ -98,21 +89,11 @@ export const getPartnerProfile = () => apiRequest('/partner/profile', { method: 
 export const updatePartnerProfile = (body: any) => apiRequest('/partner/profile', { method: 'PATCH', body: JSON.stringify(body) });
 
 // File Upload APIs
+// Uploads the partner banner after OTP verification, using the 'file' key as required by backend
 export const uploadPartnerBanner = (imageUri: string, fileName?: string) => {
   const formData = new FormData();
   const finalFileName = fileName || 'banner.jpg';
-  formData.append('banner', {
-    uri: imageUri,
-    type: getMimeType(finalFileName),
-    name: finalFileName,
-  } as any);
-  return apiUploadRequest('/partner/banner', formData);
-};
-
-export const uploadPartnerbanner = (imageUri: string, fileName?: string) => {
-  const formData = new FormData();
-  const finalFileName = fileName || 'banner.jpg';
-  formData.append('banner', {
+  formData.append('file', {
     uri: imageUri,
     type: getMimeType(finalFileName),
     name: finalFileName,

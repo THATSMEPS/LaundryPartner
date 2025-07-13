@@ -21,45 +21,10 @@ import {
   createLaundryItem, 
   updateLaundryItem, 
   deleteLaundryItem, 
-  toggleLaundryItemAvailability 
+  toggleLaundryItemAvailability, 
+  getApparelTypes 
 } from '@/utils/api';
 import Toast from 'react-native-toast-message';
-
-// const mockServices: Service[] = [
-//   {
-//     id: '1',
-//     name: 'Wash & Fold',
-//     description: 'Basic washing and folding service',
-//     price: 50,
-//     apparelTypes: 'Cotton,Polyester',
-//     isAvailable: true,
-//     partnerId: 'lp001',
-//     createdAt: '2025-01-15T10:30:00Z',
-//     updatedAt: '2025-01-15T10:30:00Z',
-//   },
-//   {
-//     id: '2',
-//     name: 'Dry Cleaning',
-//     description: 'Professional dry cleaning for delicate items',
-//     price: 80,
-//     apparelTypes: 'Silk,Wool,Cashmere',
-//     isAvailable: true,
-//     partnerId: 'lp001',
-//     createdAt: '2025-01-16T11:15:00Z',
-//     updatedAt: '2025-01-16T11:15:00Z',
-//   },
-//   {
-//     id: '3',
-//     name: 'Express Wash',
-//     description: 'Quick wash service for urgent needs',
-//     price: 150,
-//     apparelTypes: 'Cotton,Denim',
-//     isAvailable: false,
-//     partnerId: 'lp001',
-//     createdAt: '2025-01-17T09:45:00Z',
-//     updatedAt: '2025-01-17T09:45:00Z',
-//   },
-// ];
 
 export default function ServicesScreen() {
   const [services, setServices] = useState<Service[]>([]);
@@ -76,7 +41,7 @@ export default function ServicesScreen() {
     name: string;
     description: string;
     price: string;
-    apparelTypes: string;
+    apparelTypes: string[];
     isAvailable: boolean;
     state: string;
     area: string;
@@ -84,7 +49,7 @@ export default function ServicesScreen() {
     name: '',
     description: '',
     price: '',
-    apparelTypes: '',
+    apparelTypes: [],
     isAvailable: true,
     state: '',
     area: '',
@@ -95,7 +60,7 @@ export default function ServicesScreen() {
       name: '',
       description: '',
       price: '',
-      apparelTypes: '',
+      apparelTypes: [],
       isAvailable: true,
       state: '',
       area: '',
@@ -113,7 +78,7 @@ export default function ServicesScreen() {
       name: service.name,
       description: service.description,
       price: service.price.toString(),
-      apparelTypes: service.apparelTypes || '',
+      apparelTypes: Array.isArray(service.apparelTypes) ? service.apparelTypes : (typeof service.apparelTypes === 'string' ? service.apparelTypes.split(',').map((s: string) => s.trim()) : []),
       isAvailable: service.isAvailable,
       state: '',
       area: '',
@@ -147,11 +112,26 @@ export default function ServicesScreen() {
     }
 
     try {
+      // Map apparel type IDs to names using apparelTypesList from ServiceFormModal
+      // We'll need to pass apparelTypesList from ServiceFormModal as a prop or lift it up
+      // For now, fetch the mapping here for correct payload
+      let apparelTypeNameMap: Record<string, string> = {};
+      try {
+        const res = await getApparelTypes();
+        let data = res;
+        let list: { label: string; value: string }[] = Array.isArray(data)
+          ? data.map((item: any) => ({ label: item.typeName, value: item.id }))
+          : (data && Array.isArray(data.data)
+            ? data.data.map((item: any) => ({ label: item.typeName, value: item.id }))
+            : []);
+        apparelTypeNameMap = Object.fromEntries(list.map((item: { label: string; value: string }) => [item.value, item.label]));
+      } catch {}
+
       const serviceData = {
         name: formData.name,
         description: formData.description,
-        price: formData.price, // keep as string
-        apparelTypes: formData.apparelTypes, // keep as string
+        price: Number(formData.price),
+        apparelTypes: formData.apparelTypes.map((id: string) => (apparelTypeNameMap[id] || id)),
         isAvailable: formData.isAvailable,
       };
 

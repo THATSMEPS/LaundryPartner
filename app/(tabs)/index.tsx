@@ -39,6 +39,15 @@ export default function DashboardScreen() {
     checkAuth();
   }, []);
 
+  // Log token from storage on dashboard load
+  useEffect(() => {
+    const logToken = async () => {
+      const token = await AsyncStorage.getItem('token');
+      console.log('Token from storage on dashboard:', token);
+    };
+    logToken();
+  }, []);
+
   const checkAuth = async () => {
     const token = await AsyncStorage.getItem('token');
     if (!token) {

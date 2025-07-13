@@ -17,7 +17,7 @@ import {
 import { router } from 'expo-router';
 import { Eye, EyeOff, Truck, Upload } from 'lucide-react-native';
 import { theme } from '@/constants/theme';
-import { registerPartner, getAreas, uploadPartnerbanner } from '@/utils/api';
+import { registerPartner, getAreas, uploadPartnerBanner } from '@/utils/api';
 import { setItem } from '@/utils/storage';
 import { validateEmail, validatePhone, restrictPhoneInput } from '@/utils/validation';
 import Button from '@/components/Button';
@@ -41,13 +41,16 @@ export default function SignupScreen() {
       state: '', // Default blank
     },
     areaId: '', // Default blank
-    apparelTypes: '',
+    // apparelTypes: [] as string[],
     operating_radius: 5,
   });
   // Allow areas to have extra fields for autofill
   const [areas, setAreas] = useState<any[]>([]);
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  // Apparel types logic removed from signup
+
+  // Apparel types picker removed from signup
 
   // Fixed DropdownPicker component
 const DropdownPicker = ({ 
@@ -92,12 +95,12 @@ const DropdownPicker = ({
     }
   };
 
-  const handleBlur = () => {
+  const handleInputBlur = () => {
     // Longer delay to allow for item selection when keyboard is open
     setTimeout(() => {
       setShowDropdown(false);
       setSearchText('');
-    }, 300);
+    }, 500);
   };
 
   const handleSearchChange = (text: string) => {
@@ -114,11 +117,16 @@ const DropdownPicker = ({
       )
     : options;
 
-  // Handle Enter key press for selection
-  const handleKeyPress = () => {
+  // Handle Submit/Done key press for selection
+  const handleSubmitEditing = () => {
     if (searchable && searchText && filteredOptions.length > 0) {
       // Select the first matching option
       handleSelect(filteredOptions[0]);
+    } else {
+      // Just close dropdown and keyboard
+      setShowDropdown(false);
+      setSearchText('');
+      Keyboard.dismiss();
     }
   };
 
@@ -135,14 +143,15 @@ const DropdownPicker = ({
                 setShowDropdown(true);
                 setSearchText('');
               }}
-              onBlur={handleBlur}
+              onBlur={handleInputBlur}
               onChangeText={handleSearchChange}
-              onSubmitEditing={handleKeyPress} // Handle Enter key
+              onSubmitEditing={handleSubmitEditing} // Handle Done key
               placeholder={placeholder}
               placeholderTextColor={theme.colors.textSecondary}
               autoCorrect={false}
               autoCapitalize="none"
               returnKeyType="done"
+              blurOnSubmit={false}
             />
             <View style={{ position: 'absolute', right: 12, top: 14 }}>
               <Text style={styles.dropdownArrow}>{showDropdown ? '▲' : '▼'}</Text>
@@ -179,6 +188,7 @@ const DropdownPicker = ({
             style={styles.dropdownList}
             nestedScrollEnabled={true}
             keyboardShouldPersistTaps="always"
+            showsVerticalScrollIndicator={false}
           >
             {filteredOptions.length > 0 ? filteredOptions.map(item => (
               <TouchableOpacity
@@ -295,7 +305,7 @@ const DropdownPicker = ({
       formData.address.pincode,
       formData.address.state,
       formData.areaId,
-      formData.apparelTypes,
+      // formData.apparelTypes.length > 0 ? 'has_apparel_types' : '',
       formData.operating_radius
     ];
     // Enhanced: check for empty, undefined, null, whitespace, or zero for numeric fields
@@ -351,21 +361,17 @@ const DropdownPicker = ({
         mobile: formData.phone,
         address: formData.address.street + ', ' + formData.address.city + ', ' + formData.address.pincode,
         areaId: formData.areaId,
-        apparelTypes: formData.apparelTypes,
         operating_radius: Number(formData.operating_radius),
       };
       const response = await registerPartner(regData);
       // console.log('registerPartner response:', response);
       const email = response?.data?.email || formData.email;
-      // Upload profile banner if selected
+      // Store profile image URI in local storage for later upload after OTP verification
       if (profileImage) {
-        setUploading(true);
         try {
-          await uploadPartnerbanner(profileImage, `banner_${Date.now()}.jpg`);
+          await setItem('pendingProfileImage', profileImage);
         } catch (e) {
-          console.warn('banner upload failed:', e);
-        } finally {
-          setUploading(false);
+          console.warn('Failed to store profile image for later upload:', e);
         }
       }
       Alert.alert('Success', 'Verification OTP sent to your email. Please verify to complete registration.');
@@ -381,8 +387,13 @@ const DropdownPicker = ({
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
     >
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
+      <ScrollView 
+        contentContainerStyle={styles.scrollContainer}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.header}>
           <View style={styles.logoContainer}>
             <Truck size={48} color={theme.colors.primary} />
@@ -432,16 +443,23 @@ const DropdownPicker = ({
               onChange={val => {
                 setFormData(prev => {
                   const selectedArea = areas.find(a => a.id === val);
-                  return {
-                    ...prev,
-                    areaId: val,
-                    address: {
-                      ...prev.address,
-                      pincode: selectedArea?.pincode || '',
-                      city: selectedArea?.city || '',
-                      state: selectedArea?.state || '',
-                    }
-                  };
+                  if (selectedArea) {
+                    // Extract city from areaName (e.g., "Dariapur (Ahmedabad)" -> "Ahmedabad")
+                    const cityMatch = selectedArea.areaName.match(/\(([^)]+)\)/);
+                    const cityName = cityMatch ? cityMatch[1] : selectedArea.city || '';
+                    
+                    return {
+                      ...prev,
+                      areaId: val,
+                      address: {
+                        ...prev.address,
+                        pincode: selectedArea.pincode?.toString() || '',
+                        city: cityName,
+                        state: selectedArea.state || 'Gujarat', // Default to Gujarat if not provided
+                      }
+                    };
+                  }
+                  return { ...prev, areaId: val };
                 });
               }}
               placeholder="Select service area"
@@ -495,16 +513,7 @@ const DropdownPicker = ({
               keyboardType="number-pad"
             />
           </View>
-          <View style={[styles.inputContainer, { zIndex: 17 }]}>
-            <Text style={styles.label}>Apparel Types (comma separated)</Text>
-            <TextInput
-              style={styles.input}
-              value={formData.apparelTypes}
-              onChangeText={(value) => handleInputChange('apparelTypes', value)}
-              placeholder="e.g. Cotton, Silk, Wool"
-              placeholderTextColor={theme.colors.textSecondary}
-            />
-          </View>
+          {/* Apparel Types field removed from signup */}
           <View style={[styles.inputContainer, { zIndex: 16 }]}>
             <Text style={styles.label}>Email</Text>
             <TextInput
@@ -858,5 +867,29 @@ const styles = StyleSheet.create({
     ...theme.typography.bodySmall,
     color: theme.colors.primary,
     marginTop: 4,
+  },
+  selectedChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.primary + '22',
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginRight: 6,
+    marginBottom: 6,
+  },
+  selectedChipText: {
+    color: theme.colors.primary,
+    fontWeight: 'bold',
+    marginRight: 4,
+    fontSize: 14,
+  },
+  chipRemoveButton: {
+    padding: 2,
+  },
+  chipRemoveText: {
+    color: theme.colors.primary,
+    fontWeight: 'bold',
+    fontSize: 16,
   },
 });

@@ -6,7 +6,13 @@ export const setItem = async (key: string, value: any) => {
 
 export const getItem = async (key: string) => {
   const value = await AsyncStorage.getItem(key);
-  return value ? JSON.parse(value) : null;
+  if (!value) return null;
+  // Try to parse as JSON, but if fails, return as string (for token)
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
 };
 
 export const removeItem = async (key: string) => {

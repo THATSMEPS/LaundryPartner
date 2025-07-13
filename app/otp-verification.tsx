@@ -32,6 +32,7 @@ export default function OTPVerification() {
       if (token && partner) {
         await AsyncStorage.setItem('token', token);
         await AsyncStorage.setItem('partner', JSON.stringify(partner));
+        console.log('Token after verification:', token); // Log token after verification
         router.replace('/(tabs)');
       } else {
         Alert.alert('Success', 'OTP verified! You can now login.', [
