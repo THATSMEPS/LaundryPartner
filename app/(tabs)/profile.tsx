@@ -13,10 +13,11 @@ import {
   FlatList,
   Platform,
 } from 'react-native';
-import { User, Building, Mail, Phone, MapPin, Clock, CreditCard, Settings, CircleHelp as HelpCircle, LogOut, CreditCard as Edit3, Save, X, ChevronDown, Check } from 'lucide-react-native';
+import { User, Building, Mail, Phone, MapPin, Clock, CreditCard, Settings, CircleHelp as HelpCircle, LogOut, Edit3, Save, X, ChevronDown, Check } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { theme } from '@/constants/theme';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
@@ -54,8 +55,7 @@ export default function ProfileScreen() {
   const [areas, setAreas] = useState<{ id: string; areaName: string }[]>([]);
   
   // Time picker states
-  const [showOpenTimePicker, setShowOpenTimePicker] = useState(false);
-  const [showCloseTimePicker, setShowCloseTimePicker] = useState(false);
+  const [pickerType, setPickerType] = useState<'open' | 'close' | null>(null);
   const [openTime, setOpenTime] = useState(new Date());
   const [closeTime, setCloseTime] = useState(new Date());
   
@@ -116,6 +116,67 @@ export default function ProfileScreen() {
         router.replace('/login');
         return;
       }
+      
+      // First try to load from storage to avoid unnecessary API call
+      const cachedPartner = await AsyncStorage.getItem('partner');
+      if (cachedPartner) {
+        try {
+          const apiData = JSON.parse(cachedPartner);
+          const mappedProfile: ProfileData = {
+            businessName: apiData.name || '',
+            email: apiData.email || '',
+            phone: apiData.mobile || '',
+            address: apiData.address || {
+              shopNumber: '',
+              street: '',
+              landmark: '',
+              pincode: ''
+            },
+            serviceArea: apiData.areaId || '',
+            workingHours: {
+              openTime: (apiData.hours && apiData.hours.openTime) ? apiData.hours.openTime : '',
+              closeTime: (apiData.hours && apiData.hours.closeTime) ? apiData.hours.closeTime : '',
+            },
+            notifications: {
+              newOrders: false,
+              payments: false,
+              messages: false,
+            },
+          };
+          setProfileData(mappedProfile);
+          setEditData(mappedProfile);
+          
+          // Initialize time pickers with current data or defaults
+          if (mappedProfile.workingHours?.openTime) {
+            const [hours, minutes] = mappedProfile.workingHours.openTime.split(':');
+            const openDate = new Date();
+            openDate.setHours(parseInt(hours), parseInt(minutes));
+            setOpenTime(openDate);
+          } else {
+            const defaultOpen = new Date();
+            defaultOpen.setHours(8, 0);
+            setOpenTime(defaultOpen);
+          }
+          
+          if (mappedProfile.workingHours?.closeTime) {
+            const [hours, minutes] = mappedProfile.workingHours.closeTime.split(':');
+            const closeDate = new Date();
+            closeDate.setHours(parseInt(hours), parseInt(minutes));
+            setCloseTime(closeDate);
+          } else {
+            const defaultClose = new Date();
+            defaultClose.setHours(20, 0);
+            setCloseTime(defaultClose);
+          }
+          
+          setLoading(false);
+          return;
+        } catch (e) {
+          // Fall through to API call if cached data is corrupted
+        }
+      }
+      
+      // Only call API if no cached data or if cached data failed to parse
       try {
         const res = await getPartnerProfile();
         // console.log('Fetched profile data:', res);
@@ -143,6 +204,9 @@ export default function ProfileScreen() {
         };
         setProfileData(mappedProfile);
         setEditData(mappedProfile);
+        
+        // Update cache
+        await AsyncStorage.setItem('partner', JSON.stringify(apiData));
         
         // Initialize time pickers with current data or defaults
         if (mappedProfile.workingHours?.openTime) {
@@ -193,29 +257,28 @@ export default function ProfileScreen() {
     return `${hours}:${minutes}`;
   };
 
-  // Handle time picker changes
-  const handleOpenTimeChange = (event: any, selectedDate?: Date) => {
-    setShowOpenTimePicker(Platform.OS === 'ios');
-    if (selectedDate) {
-      setOpenTime(selectedDate);
-      const timeString = formatTime(selectedDate);
+  // Handle time picker modal changes
+  const handleTimeConfirm = (date: Date) => {
+    if (pickerType === 'open') {
+      setOpenTime(date);
+      const timeString = formatTime(date);
       updateEditData('workingHours', {
         ...((editData?.workingHours || { openTime: '', closeTime: '' })),
         openTime: timeString
       });
-    }
-  };
-
-  const handleCloseTimeChange = (event: any, selectedDate?: Date) => {
-    setShowCloseTimePicker(Platform.OS === 'ios');
-    if (selectedDate) {
-      setCloseTime(selectedDate);
-      const timeString = formatTime(selectedDate);
+    } else if (pickerType === 'close') {
+      setCloseTime(date);
+      const timeString = formatTime(date);
       updateEditData('workingHours', {
         ...((editData?.workingHours || { openTime: '', closeTime: '' })),
         closeTime: timeString
       });
     }
+    setPickerType(null);
+  };
+
+  const handleTimeCancel = () => {
+    setPickerType(null);
   };
 
   // Handle area selection
@@ -409,11 +472,10 @@ export default function ProfileScreen() {
   // Dropdown for area selection in edit mode
   const renderAreaField = () => {
     if (!editData) return null;
-    
     return (
       <View style={styles.fieldContainer}>
         <View style={styles.fieldHeader}>
-          <MapPin size={20} color={theme.colors.secondary} />
+          <MapPin size={20} color={theme.colors.primary} />
           <Text style={styles.fieldLabel}>Service Area</Text>
         </View>
         {isEditing ? (
@@ -703,67 +765,59 @@ export default function ProfileScreen() {
         <Card style={styles.section}>
           <Text style={styles.sectionTitle}>Working Hours</Text>
           <View style={styles.workingHoursContainer}>
-            <View style={styles.timeField}>
+            <View style={styles.timeFieldRow}>
               <Clock size={20} color={theme.colors.primary} />
               <Text style={styles.timeLabel}>Open Time</Text>
               {isEditing ? (
                 <TouchableOpacity
                   style={styles.timeInputButton}
-                  onPress={() => setShowOpenTimePicker(true)}
+                  onPress={() => setPickerType('open')}
+                  activeOpacity={0.7}
                 >
-                  <Text style={styles.timeInputText}>
-                    {editData?.workingHours?.openTime || '8:00'}
+                  <Text style={[styles.timeInputText, !editData?.workingHours?.openTime && styles.timePlaceholder]}>
+                    {editData?.workingHours?.openTime || 'Set'}
                   </Text>
                   <Clock size={16} color={theme.colors.textSecondary} />
                 </TouchableOpacity>
               ) : (
                 <Text style={styles.timeValue}>
-                  {editData?.workingHours?.openTime || 'Not set'}
+                  {editData?.workingHours?.openTime ? editData?.workingHours?.openTime : 'Not set'}
                 </Text>
               )}
             </View>
-
-            <View style={styles.timeField}>
-              <Clock size={20} color={theme.colors.secondary} />
+            <View style={styles.timeFieldRow}>
+              <Clock size={20} color={theme.colors.primary} />
               <Text style={styles.timeLabel}>Close Time</Text>
               {isEditing ? (
                 <TouchableOpacity
                   style={styles.timeInputButton}
-                  onPress={() => setShowCloseTimePicker(true)}
+                  onPress={() => setPickerType('close')}
+                  activeOpacity={0.7}
                 >
-                  <Text style={styles.timeInputText}>
-                    {editData?.workingHours?.closeTime || '20:00'}
+                  <Text style={[styles.timeInputText, !editData?.workingHours?.closeTime && styles.timePlaceholder]}>
+                    {editData?.workingHours?.closeTime || 'Set'}
                   </Text>
                   <Clock size={16} color={theme.colors.textSecondary} />
                 </TouchableOpacity>
               ) : (
                 <Text style={styles.timeValue}>
-                  {editData?.workingHours?.closeTime || 'Not set'}
+                  {editData?.workingHours?.closeTime ? editData?.workingHours?.closeTime : 'Not set'}
                 </Text>
               )}
             </View>
-            
-            {/* Time Pickers */}
-            {showOpenTimePicker && (
-              <DateTimePicker
-                value={openTime}
-                mode="time"
-                is24Hour={true}
-                display="default"
-                onChange={handleOpenTimeChange}
-              />
-            )}
-            
-            {showCloseTimePicker && (
-              <DateTimePicker
-                value={closeTime}
-                mode="time"
-                is24Hour={true}
-                display="default"
-                onChange={handleCloseTimeChange}
-              />
-            )}
+            {/* Modal Time Picker */}
+            <DateTimePickerModal
+              isVisible={pickerType !== null}
+              mode="time"
+              date={pickerType === 'open' ? openTime : closeTime}
+              onConfirm={handleTimeConfirm}
+              onCancel={handleTimeCancel}
+              is24Hour={true}
+              // headerTextIOS removed, not supported by this component
+              display="spinner"
+            />
           </View>
+
         </Card>
 
         {/* Notification Settings */}
@@ -841,6 +895,14 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
+  timeFieldRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.md,
+  },
+  timePlaceholder: {
+    color: theme.colors.textSecondary,
+  },
   container: {
     flex: 1,
     backgroundColor: theme.colors.background,

@@ -142,8 +142,39 @@ export default function AnalyticsScreen() {
     setLoading(true);
     try {
       const res = await getPartnerOrders();
-      const allOrders = res.data?.orders || res.orders || [];
-      const deliveredOrders: Order[] = allOrders.filter((order: Order) => order.status === 'delivered');
+      const backendOrders = res.data?.orders || res.orders || [];
+      // Map and filter only delivered orders for analytics
+      const deliveredOrders: Order[] = backendOrders
+        .filter((order: any) => order.status === 'delivered')
+        .map((order: any) => ({
+          id: order.id.includes('-') ? order.id.split('-')[0] : order.id, // Truncate ID at first hyphen
+          fullId: order.id, // Keep full ID for API calls
+          customerId: order.customerId,
+          customerName: order.customer?.name || 'Unknown',
+          phoneNumber: order.customer?.mobile || '',
+          pickupAddress: `${order.address?.pickup?.street || ''}, ${order.address?.pickup?.landmark || ''}, ${order.address?.pickup?.city || ''}`.trim(),
+          pickupDate: order.placedAt ? new Date(order.placedAt).toLocaleDateString() : '',
+          pickupTime: order.placedAt ? new Date(order.placedAt).toLocaleTimeString() : '',
+          itemCount: `${order.items?.length || 0} items`,
+          status: order.status,
+          paymentType: order.paymentType,
+          paymentStatus: order.paymentStatus,
+          totalAmount: parseFloat(order.totalAmount || '0'),
+          gst: parseFloat(order.gst || '0'),
+          deliveryFee: parseFloat(order.deliveryFee || '0'),
+          deliveryPartnerId: order.deliveryPartnerId,
+          distance: parseFloat(order.distance || '0'),
+          deliveredAt: order.deliveredAt || order.dpDeliveredAt,
+          deliveredDate: order.deliveredAt || order.dpDeliveredAt,
+          placedAt: order.placedAt,
+          items: order.items?.map((item: any) => ({
+            id: item.id,
+            name: item.laundryItem?.name || item.name || 'Unknown Item',
+            quantity: item.quantity || 1,
+            price: parseFloat(item.price || item.laundryItem?.price || '0'),
+          })) || [],
+          itemsAmount: parseFloat(order.itemsAmount || '0'),
+        }));
       setOrders(deliveredOrders);
     } catch (e) {
       setOrders([]);

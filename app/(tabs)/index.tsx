@@ -21,7 +21,7 @@ import { router } from 'expo-router';
 
 export default function DashboardScreen() {
   const [orders, setOrders] = useState<Order[]>([]);
-  const [activeTab, setActiveTab] = useState<'pending' | 'in_process' | 'out_for_delivery'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'in_process' | 'ready_for_delivery'>('pending');
   const [refreshing, setRefreshing] = useState(false);
   const [notifications, setNotifications] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
@@ -31,6 +31,8 @@ export default function DashboardScreen() {
   const [isOpen, setisOpen] = useState(true);
   const scrollY = new Animated.Value(0);
   const [showFloatingSearch, setShowFloatingSearch] = useState(false);
+  const [headerHeight, setHeaderHeight] = useState(0);
+  const [searchBarHeight, setSearchBarHeight] = useState(0);
   
   // Get screen width for responsive design
   const screenWidth = Dimensions.get('window').width;
@@ -43,10 +45,17 @@ export default function DashboardScreen() {
   useEffect(() => {
     const logToken = async () => {
       const token = await AsyncStorage.getItem('token');
-      console.log('Token from storage on dashboard:', token);
+      // console.log('Token from storage on dashboard:', token);
     };
     logToken();
   }, []);
+
+  // Handle authentication redirect
+  useEffect(() => {
+    if (isAuthenticated === false) {
+      router.replace('/login');
+    }
+  }, [isAuthenticated]);
 
   const checkAuth = async () => {
     const token = await AsyncStorage.getItem('token');
@@ -71,8 +80,39 @@ export default function DashboardScreen() {
   const fetchOrders = async () => {
     setLoading(true);
     try {
-      const data = await getPartnerOrders();
-      setOrders(data.orders || []);
+      const response = await getPartnerOrders();
+      // Backend returns: { success: true, message: "...", data: { orders: [...] } }
+      const backendOrders = response.data?.orders || response.orders || [];
+      
+      // Map backend order structure to frontend Order interface
+      const mappedOrders = backendOrders.map((order: any) => ({
+        id: order.id?.includes('-') ? order.id.split('-')[0] : (order.id || 'N/A'), // Truncate ID at first hyphen
+        fullId: order.id || '', // Keep full ID for API calls
+        customerId: order.customerId || '',
+        customerName: order.customer?.name || 'Unknown',
+        phoneNumber: order.customer?.mobile || '',
+        pickupAddress: `${order.address?.pickup?.street || ''}, ${order.address?.pickup?.landmark || ''}, ${order.address?.pickup?.city || ''}`.trim() || 'No address',
+        pickupDate: order.placedAt ? new Date(order.placedAt).toLocaleDateString() : '',
+        pickupTime: order.placedAt ? new Date(order.placedAt).toLocaleTimeString() : '',
+        itemCount: `${order.items?.length || 0} items`,
+        status: order.status || 'pending',
+        paymentType: order.paymentType || 'COD',
+        paymentStatus: order.paymentStatus || 'pending',
+        totalAmount: parseFloat(order.totalAmount || '0'),
+        gst: parseFloat(order.gst || '0'),
+        deliveryFee: parseFloat(order.deliveryFee || '0'),
+        deliveryPartnerId: order.deliveryPartnerId || '',
+        distance: parseFloat(order.distance || '0'),
+        items: order.items?.map((item: any) => ({
+          id: item.id || '',
+          name: item.laundryItem?.name || item.name || 'Unknown Item',
+          quantity: item.quantity || 1,
+          price: parseFloat(item.price || item.laundryItem?.price || '0'),
+        })) || [],
+        itemsAmount: parseFloat(order.itemsAmount || '0'),
+      }));
+      
+      setOrders(mappedOrders);
     } catch (e) {
       Alert.alert('Error', 'Failed to load orders');
     } finally {
@@ -116,7 +156,29 @@ export default function DashboardScreen() {
     }
   };
 
-  const handleMarkDelivered = (orderId: string) => {
+  const handleDispatchForDelivery = async (orderId: string) => {
+    Alert.alert(
+      'Dispatch for Delivery',
+      'Confirm that this order is ready to be dispatched for delivery?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Dispatch',
+          onPress: async () => {
+            try {
+              await updateOrderStatus(orderId, { status: 'out_for_delivery' });
+              fetchOrders();
+              Alert.alert('Success', 'Order dispatched for delivery!');
+            } catch (e: any) {
+              Alert.alert('Error', e.message || 'Failed to dispatch order');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleMarkDelivered = async (orderId: string) => {
     Alert.alert(
       'Mark as Delivered',
       'Confirm that this order has been delivered?',
@@ -124,13 +186,14 @@ export default function DashboardScreen() {
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delivered',
-          onPress: () => {
-            setOrders(prev =>
-              prev.map(order =>
-                order.id === orderId ? { ...order, status: 'delivered' } : order
-              )
-            );
-            Alert.alert('Success', 'Order marked as delivered!');
+          onPress: async () => {
+            try {
+              await updateOrderStatus(orderId, { status: 'delivered' });
+              fetchOrders();
+              Alert.alert('Success', 'Order marked as delivered!');
+            } catch (e: any) {
+              Alert.alert('Error', e.message || 'Failed to mark as delivered');
+            }
           },
         },
       ]
@@ -159,11 +222,20 @@ export default function DashboardScreen() {
   };
 
   const getTabCount = (status: string) => {
+    if (status === 'pending') {
+      // Include both pending and confirmed orders in pending tab
+      return orders.filter(order => 
+        order.status === 'pending' || 
+        order.status === 'confirmed' || 
+        order.status === 'pickup_scheduled' || 
+        order.status === 'picked_up'
+      ).length;
+    }
     return orders.filter(order => order.status === status).length;
   };
 
   const renderTabButton = (
-    tab: 'pending' | 'in_process' | 'out_for_delivery',
+    tab: 'pending' | 'in_process' | 'ready_for_delivery',
     title: string
   ) => {
     const count = getTabCount(tab);
@@ -208,9 +280,6 @@ export default function DashboardScreen() {
 
   if (isAuthenticated === false) {
     // Not logged in, redirect to login
-    setTimeout(() => {
-      router.replace('/login');
-    }, 100);
     return (
       <SafeAreaView style={styles.container}>
         <Text style={{textAlign: 'center', marginTop: 40}}>Redirecting to login...</Text>
@@ -218,79 +287,33 @@ export default function DashboardScreen() {
     );
   }
 
-  const filteredOrders = orders.filter(order => order.status === activeTab && (
-    order.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    order.customerName.toLowerCase().includes(searchQuery.toLowerCase())
-  ));
+  const filteredOrders = orders.filter(order => {
+    let shouldInclude = false;
+    
+    if (activeTab === 'pending') {
+      // Include pending, confirmed, pickup_scheduled, and picked_up orders in pending tab
+      shouldInclude = ['pending', 'confirmed', 'pickup_scheduled', 'picked_up'].includes(order.status);
+    } else {
+      shouldInclude = order.status === activeTab;
+    }
+    
+    return shouldInclude && (
+      (order.id || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (order.customerName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (order.pickupAddress || '').toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  });
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Enhanced Header */}
-      <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <View style={styles.welcomeSection}>
-            <Text style={styles.welcomeText}>Welcome back! 👋</Text>
-            <Text style={styles.businessName}>{partnerName}</Text>
-            <View style={styles.statsRow}>
-              <View style={styles.statItem}>
-                <TrendingUp size={16} color={theme.colors.success} />
-                <Text style={styles.statText}>Active</Text>
-              </View>
-              <View style={styles.statDot} />
-              <View style={styles.statItem}>
-                <Star size={16} color={theme.colors.secondary} />
-                <Text style={styles.statText}>4.8 Rating</Text>
-              </View>
-            </View>
-          </View>
-          <TouchableOpacity 
-            style={[
-              styles.statusToggleButton,
-              { backgroundColor: isOpen ? theme.colors.success : theme.colors.error }
-            ]}
-            onPress={togglePartnerStatus}
-          >
-            <Power size={20} color={theme.colors.white} />
-            <Text style={styles.statusToggleText}>
-              {isOpen ? 'Online' : 'Offline'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Enhanced Search Bar */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchWrapper}>
-          <Search size={20} color={theme.colors.textSecondary} style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search orders..."
-            placeholderTextColor={theme.colors.textSecondary}
-            onChangeText={(text) => setSearchQuery(text)}
-            value={searchQuery}
-          />
-        </View>
-      </View>
-
       {/* Floating Search Bar */}
       {showFloatingSearch && (
-        <Animated.View 
-          style={[
-            styles.floatingSearchContainer,
-            {
-              transform: [{ translateY: scrollY.interpolate({
-                inputRange: [0, 100],
-                outputRange: [-100, 0],
-                extrapolate: 'clamp',
-              })}],
-            }
-          ]}
-        >
+        <Animated.View style={styles.floatingSearchContainer}>
           <View style={styles.floatingSearchWrapper}>
             <Search size={18} color={theme.colors.textSecondary} style={styles.searchIcon} />
             <TextInput
               style={styles.floatingSearchInput}
-              placeholder="Search orders..."
+              placeholder="Search by order ID, customer, or address..."
               placeholderTextColor={theme.colors.textSecondary}
               onChangeText={(text) => setSearchQuery(text)}
               value={searchQuery}
@@ -298,13 +321,6 @@ export default function DashboardScreen() {
           </View>
         </Animated.View>
       )}
-
-      {/* Enhanced Tabs */}
-      <View style={styles.tabContainer}>
-        {renderTabButton('pending', 'Pending')}
-        {renderTabButton('in_process', 'Processing')}
-        {renderTabButton('out_for_delivery', 'Delivery')}
-      </View>
 
       <Animated.FlatList
         data={filteredOrders}
@@ -315,19 +331,86 @@ export default function DashboardScreen() {
             onApprove={handleApprove}
             onReject={handleReject}
             onMarkReady={handleMarkReady}
+            onDispatchForDelivery={handleDispatchForDelivery}
             onMarkDelivered={handleMarkDelivered}
             onCallCustomer={handleCallCustomer}
           />
         )}
+        ListHeaderComponent={
+          <View>
+            {/* Enhanced Header */}
+            <View onLayout={e => setHeaderHeight(e.nativeEvent.layout.height)}>
+              <View style={styles.header}>
+                <View style={styles.headerContent}>
+                  <View style={styles.welcomeSection}>
+                    {/* <Text style={styles.welcomeText}>Welcome back! 👋</Text> */}
+                    <Text style={styles.businessName}>{partnerName}</Text>
+                    <View style={styles.statsRow}>
+                      <View style={styles.statItem}>
+                        <TrendingUp size={16} color={theme.colors.success} />
+                        <Text style={styles.statText}>Active</Text>
+                      </View>
+                      <View style={styles.statDot} />
+                      <View style={styles.statItem}>
+                        <Star size={16} color={theme.colors.secondary} />
+                        <Text style={styles.statText}>4.8 Rating</Text>
+                      </View>
+                    </View>
+                  </View>
+                  <TouchableOpacity 
+                    style={[
+                      styles.statusToggleButton,
+                      { backgroundColor: isOpen ? theme.colors.success : theme.colors.error }
+                    ]}
+                    onPress={togglePartnerStatus}
+                  >
+                    <Power size={20} color={theme.colors.white} />
+                    <Text style={styles.statusToggleText}>
+                      {isOpen ? 'Online' : 'Offline'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+
+            {/* Enhanced Search Bar */}
+            <View onLayout={e => setSearchBarHeight(e.nativeEvent.layout.height)}>
+              <View style={styles.searchContainer}>
+                <View style={styles.searchWrapper}>
+                  <Search size={20} color={theme.colors.textSecondary} style={styles.searchIcon} />
+                  <TextInput
+                    style={styles.searchInput}
+                    placeholder="Search by order ID, customer, or address..."
+                    placeholderTextColor={theme.colors.textSecondary}
+                    onChangeText={(text) => setSearchQuery(text)}
+                    value={searchQuery}
+                  />
+                </View>
+              </View>
+            </View>
+
+            {/* Enhanced Tabs */}
+            <View style={styles.tabContainer}>
+              {renderTabButton('pending', 'Pending')}
+              {renderTabButton('in_process', 'Processing')}
+              {renderTabButton('ready_for_delivery', 'Delivery')}
+            </View>
+          </View>
+        }
         contentContainerStyle={styles.listContainer}
         onScroll={Animated.event(
           [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-          { 
+          {
             useNativeDriver: true,
             listener: (event: any) => {
               const offsetY = event.nativeEvent.contentOffset.y;
-              setShowFloatingSearch(offsetY > 100);
-            }
+              // Show floating search only when header+search bar is fully out of view
+              if (headerHeight + searchBarHeight > 0) {
+                setShowFloatingSearch(offsetY >= headerHeight + searchBarHeight - 10);
+              } else {
+                setShowFloatingSearch(offsetY > 100);
+              }
+            },
           }
         )}
         scrollEventThrottle={16}
@@ -343,9 +426,9 @@ export default function DashboardScreen() {
           <View style={styles.emptyContainer}>
             <RefreshCw size={48} color={theme.colors.textSecondary} />
             <Text style={styles.emptyText}>
-              {activeTab === 'pending' && 'No pending orders'}
-              {activeTab === 'in_process' && 'No orders in process'}
-              {activeTab === 'out_for_delivery' && 'No orders to deliver'}
+              {activeTab === 'pending' ? 'No orders to process' : 
+               activeTab === 'in_process' ? 'No orders in process' :
+               'No orders to deliver'}
             </Text>
             <Text style={styles.emptySubtext}>
               Pull down to refresh and check for new orders

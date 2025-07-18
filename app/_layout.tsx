@@ -73,8 +73,18 @@ export default function RootLayout() {
         setCheckingAuth(false);
         return;
       }
-      // If token exists, check if partner profile exists in DB
+      
+      // If token exists and we're not on public routes
       if (token && !publicRoutes.includes(pathname)) {
+        // Check if we already have partner data in storage
+        const partnerData = await AsyncStorage.getItem('partner');
+        if (partnerData) {
+          // We have partner data, skip API call
+          setCheckingAuth(false);
+          return;
+        }
+        
+        // Only call API if we don't have partner data
         try {
           const res = await getPartnerProfile();
           if (!res || !res.data) {
@@ -84,6 +94,8 @@ export default function RootLayout() {
             setCheckingAuth(false);
             return;
           }
+          // Store partner data to avoid future API calls
+          await AsyncStorage.setItem('partner', JSON.stringify(res.data));
         } catch (e) {
           // If error is 404 or not found, treat as missing partner
           const err: any = e;
@@ -99,7 +111,7 @@ export default function RootLayout() {
       setCheckingAuth(false);
     };
     checkAuthAndPartner();
-  }, [pathname]);
+  }, []); // Remove pathname dependency to avoid multiple calls
 
   if (checkingAuth) {
     return (

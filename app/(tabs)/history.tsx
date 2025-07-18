@@ -11,6 +11,7 @@ import {
   ScrollView,
   Animated,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Filter, Download, Eye, X } from 'lucide-react-native';
 import { theme } from '@/constants/theme';
 import Card from '@/components/Card';
@@ -59,13 +60,12 @@ export default function HistoryScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await getPartnerProfile();
-        if (res && res.data) {
-          // Map backend fields to PartnerProfile shape if needed
-          const apiData = res.data;
+        // First try to get from cached storage
+        const cachedPartner = await AsyncStorage.getItem('partner');
+        if (cachedPartner) {
+          const apiData = JSON.parse(cachedPartner);
           const mappedProfile = {
             businessName: apiData.name || '',
-            // name: apiData.name || '',
             email: apiData.email || '',
             phone: apiData.mobile || '',
             address: apiData.address || '',
@@ -73,6 +73,24 @@ export default function HistoryScreen() {
             ...apiData,
           };
           await saveProfile(mappedProfile);
+          return;
+        }
+        
+        // Only call API if no cached data
+        const res = await getPartnerProfile();
+        if (res && res.data) {
+          const apiData = res.data;
+          const mappedProfile = {
+            businessName: apiData.name || '',
+            email: apiData.email || '',
+            phone: apiData.mobile || '',
+            address: apiData.address || '',
+            serviceArea: apiData.areaId || '',
+            ...apiData,
+          };
+          await saveProfile(mappedProfile);
+          // Update cache
+          await AsyncStorage.setItem('partner', JSON.stringify(apiData));
         }
       } catch (e) {
         // ignore
@@ -88,13 +106,13 @@ export default function HistoryScreen() {
       // Map backend order data to HistoryOrder interface
       const backendOrders = (res.data?.orders || res.orders || []);
       const mappedOrders: HistoryOrder[] = backendOrders.map((order: any) => ({
-        id: order.id,
+        id: order.id.includes('-') ? order.id.split('-')[0] : order.id, // Truncate ID at first hyphen
         customerName: order.customer?.name || 'N/A',
-        phoneNumber: order.customer?.phone || '',
-        pickupAddress: order.pickupAddress || '',
-        deliveredDate: order.deliveredAt || order.placedAt || '',
-        totalAmount: order.totalAmount || 0,
-        status: order.status === 'delivered' || order.status === 'failed' || order.status === 'rejected' ? order.status : 'delivered',
+        phoneNumber: order.customer?.mobile || '',
+        pickupAddress: `${order.address?.pickup?.street || ''}, ${order.address?.pickup?.landmark || ''}, ${order.address?.pickup?.city || ''}`.trim(),
+        deliveredDate: order.deliveredAt || order.dpDeliveredAt || order.placedAt || '',
+        totalAmount: parseFloat(order.totalAmount || '0'),
+        status: order.status || 'delivered', // Keep original status from backend
         services: order.items?.map((item: any) => item.laundryItem?.name || item.name) || [],
         paymentStatus: order.paymentStatus || 'paid',
         rating: order.rating,
