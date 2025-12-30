@@ -12,20 +12,19 @@ import {
   Animated,
 } from 'react-native';
 import { FlatList as RNFlatList } from 'react-native';
-import { RefreshCw, Search, Star, TrendingUp, Power } from 'lucide-react-native';
+import { RefreshCw, Search, Star, TrendingUp, Power, Wifi, WifiOff } from 'lucide-react-native';
 import { theme } from '@/constants/theme';
 import OrderCard, { Order } from '@/components/OrderCard';
-import { getPartnerOrders, updateOrderStatus, updatePartnerStatus } from '@/utils/api';
+import { updateOrderStatus, updatePartnerStatus } from '@/utils/api';
+import { useOrderManager } from '@/hooks/useOrderManager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 
 export default function DashboardScreen() {
-  const [orders, setOrders] = useState<Order[]>([]);
   const [activeTab, setActiveTab] = useState<'pending' | 'in_process' | 'ready_for_delivery'>('pending');
   const [refreshing, setRefreshing] = useState(false);
   const [notifications, setNotifications] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [partnerName, setPartnerName] = useState('Partner');
   const [isOpen, setisOpen] = useState(true);
@@ -33,6 +32,19 @@ export default function DashboardScreen() {
   const [showFloatingSearch, setShowFloatingSearch] = useState(false);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [searchBarHeight, setSearchBarHeight] = useState(0);
+  
+  // Use unified order manager with automatic SSE/polling fallback
+  const { 
+    orders, 
+    loading, 
+    connectionStatus, 
+    lastUpdate,
+    refreshOrders, 
+    updateOrderOptimistically,
+    isConnected,
+    strategy,
+    connectionInfo
+  } = useOrderManager();
   
   // Get screen width for responsive design
   const screenWidth = Dimensions.get('window').width;
@@ -73,85 +85,59 @@ export default function DashboardScreen() {
           setPartnerName('Partner');
         }
       }
-      fetchOrders();
-    }
-  };
-
-  const fetchOrders = async () => {
-    setLoading(true);
-    try {
-      const response = await getPartnerOrders();
-      // Backend returns: { success: true, message: "...", data: { orders: [...] } }
-      const backendOrders = response.data?.orders || response.orders || [];
-      
-      // Map backend order structure to frontend Order interface
-      const mappedOrders = backendOrders.map((order: any) => ({
-        id: order.id?.includes('-') ? order.id.split('-')[0] : (order.id || 'N/A'), // Truncate ID at first hyphen
-        fullId: order.id || '', // Keep full ID for API calls
-        customerId: order.customerId || '',
-        customerName: order.customer?.name || 'Unknown',
-        phoneNumber: order.customer?.mobile || '',
-        pickupAddress: `${order.address?.pickup?.street || ''}, ${order.address?.pickup?.landmark || ''}, ${order.address?.pickup?.city || ''}`.trim() || 'No address',
-        pickupDate: order.placedAt ? new Date(order.placedAt).toLocaleDateString() : '',
-        pickupTime: order.placedAt ? new Date(order.placedAt).toLocaleTimeString() : '',
-        itemCount: `${order.items?.length || 0} items`,
-        status: order.status || 'pending',
-        paymentType: order.paymentType || 'COD',
-        paymentStatus: order.paymentStatus || 'pending',
-        totalAmount: parseFloat(order.totalAmount || '0'),
-        gst: parseFloat(order.gst || '0'),
-        deliveryFee: parseFloat(order.deliveryFee || '0'),
-        deliveryPartnerId: order.deliveryPartnerId || '',
-        distance: parseFloat(order.distance || '0'),
-        items: order.items?.map((item: any) => ({
-          id: item.id || '',
-          name: item.laundryItem?.name || item.name || 'Unknown Item',
-          quantity: item.quantity || 1,
-          price: parseFloat(item.price || item.laundryItem?.price || '0'),
-        })) || [],
-        itemsAmount: parseFloat(order.itemsAmount || '0'),
-      }));
-      
-      setOrders(mappedOrders);
-    } catch (e) {
-      Alert.alert('Error', 'Failed to load orders');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+      // fetchOrders is now handled by useRealTimeOrders hook
     }
   };
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchOrders();
+    try {
+      await refreshOrders();
+    } catch (error) {
+      Alert.alert('Error', 'Failed to refresh orders');
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const handleApprove = async (orderId: string) => {
     try {
+      // Optimistic update
+      updateOrderOptimistically(orderId, { status: 'confirmed' });
+      
       await updateOrderStatus(orderId, { status: 'confirmed' });
-      fetchOrders();
       Alert.alert('Success', 'Order approved successfully!');
     } catch (e: any) {
+      // Revert optimistic update on error
+      await refreshOrders();
       Alert.alert('Error', e.message || 'Failed to approve order');
     }
   };
 
   const handleReject = async (orderId: string) => {
     try {
+      // Optimistic update
+      updateOrderOptimistically(orderId, { status: 'rejected' });
+      
       await updateOrderStatus(orderId, { status: 'rejected' });
-      fetchOrders();
       Alert.alert('Success', 'Order rejected successfully!');
     } catch (e: any) {
+      // Revert optimistic update on error
+      await refreshOrders();
       Alert.alert('Error', e.message || 'Failed to reject order');
     }
   };
 
   const handleMarkReady = async (orderId: string) => {
     try {
+      // Optimistic update
+      updateOrderOptimistically(orderId, { status: 'ready_for_delivery' });
+      
       await updateOrderStatus(orderId, { status: 'ready_for_delivery' });
-      fetchOrders();
       Alert.alert('Success', 'Order marked as ready for delivery!');
     } catch (e: any) {
+      // Revert optimistic update on error
+      await refreshOrders();
       Alert.alert('Error', e.message || 'Failed to mark as ready');
     }
   };
@@ -166,10 +152,14 @@ export default function DashboardScreen() {
           text: 'Dispatch',
           onPress: async () => {
             try {
+              // Optimistic update
+              updateOrderOptimistically(orderId, { status: 'out_for_delivery' });
+              
               await updateOrderStatus(orderId, { status: 'out_for_delivery' });
-              fetchOrders();
               Alert.alert('Success', 'Order dispatched for delivery!');
             } catch (e: any) {
+              // Revert optimistic update on error
+              await refreshOrders();
               Alert.alert('Error', e.message || 'Failed to dispatch order');
             }
           },
@@ -188,10 +178,14 @@ export default function DashboardScreen() {
           text: 'Delivered',
           onPress: async () => {
             try {
+              // Optimistic update
+              updateOrderOptimistically(orderId, { status: 'delivered' });
+              
               await updateOrderStatus(orderId, { status: 'delivered' });
-              fetchOrders();
               Alert.alert('Success', 'Order marked as delivered!');
             } catch (e: any) {
+              // Revert optimistic update on error
+              await refreshOrders();
               Alert.alert('Error', e.message || 'Failed to mark as delivered');
             }
           },
@@ -224,14 +218,14 @@ export default function DashboardScreen() {
   const getTabCount = (status: string) => {
     if (status === 'pending') {
       // Include both pending and confirmed orders in pending tab
-      return orders.filter(order => 
+      return orders.filter((order: Order) => 
         order.status === 'pending' || 
         order.status === 'confirmed' || 
         order.status === 'pickup_scheduled' || 
         order.status === 'picked_up'
       ).length;
     }
-    return orders.filter(order => order.status === status).length;
+    return orders.filter((order: Order) => order.status === status).length;
   };
 
   const renderTabButton = (
@@ -287,7 +281,7 @@ export default function DashboardScreen() {
     );
   }
 
-  const filteredOrders = orders.filter(order => {
+  const filteredOrders = orders.filter((order: Order) => {
     let shouldInclude = false;
     
     if (activeTab === 'pending') {
@@ -355,6 +349,22 @@ export default function DashboardScreen() {
                         <Star size={16} color={theme.colors.secondary} />
                         <Text style={styles.statText}>4.8 Rating</Text>
                       </View>
+                      <View style={styles.statDot} />
+                      <View style={styles.statItem}>
+                        {isConnected ? (
+                          <Wifi size={16} color={theme.colors.success} />
+                        ) : (
+                          <WifiOff size={16} color={theme.colors.error} />
+                        )}
+                        <Text style={[styles.statText, { color: isConnected ? theme.colors.success : theme.colors.error }]}>
+                          {isConnected ? (strategy === 'sse' ? 'Live' : 'Sync') : 'Offline'}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.statsRow}>
+                      <Text style={styles.lastUpdateText}>
+                        Last updated: {lastUpdate.toLocaleTimeString()} • {strategy.toUpperCase()}
+                      </Text>
                     </View>
                   </View>
                   <TouchableOpacity 
@@ -485,6 +495,12 @@ const styles = StyleSheet.create({
     ...theme.typography.caption,
     color: theme.colors.textSecondary,
     fontWeight: '600',
+  },
+  lastUpdateText: {
+    ...theme.typography.caption,
+    color: theme.colors.textSecondary,
+    fontSize: 11,
+    marginTop: 4,
   },
   statDot: {
     width: 4,

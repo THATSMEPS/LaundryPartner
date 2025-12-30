@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getItem } from './storage';
 
 // @ts-ignore
-const API_BASE = process.env.API_BASE || 'https://laundrybackend-573d.onrender.com/api';
+const API_BASE = process.env.API_BASE || 'https://laundrybackend-js2r.onrender.com/api';
 
 // Helper function to get MIME type from file extension
 export function getMimeType(fileName: string): string {
